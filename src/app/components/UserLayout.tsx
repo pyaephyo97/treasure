@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { LogOut, Bell, X, AlertCircle, CheckCircle, Copy, CheckCheck, ClipboardList, History, Receipt, CalendarClock } from 'lucide-react';
+import { LogOut, Bell, X, AlertCircle, CheckCircle, Copy, CheckCheck, ClipboardList, History, Receipt, CalendarClock, ClipboardPaste, Trash2, Scissors } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context';
 import { C } from '../theme';
@@ -62,6 +62,7 @@ export function UserLayout() {
   const [mode, setMode] = useState<EntryMode>('bulk');
   const [bulkText, setBulkText] = useState('');
   const [parsed, setParsed] = useState<ParsedLine[] | null>(null);
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const [singleNum, setSingleNum] = useState('');
   const [singleAmt, setSingleAmt] = useState('');
   const [dismissedWarnings, setDismissedWarnings] = useState<string[]>([]);
@@ -150,47 +151,93 @@ export function UserLayout() {
     setParsed(results);
   };
 
+  // Summary used both for the "N valid entries · Total: X" bar and to
+  // gate/word the confirm-before-submit modal.
+  const bulkStats = useMemo(() => {
+    if (!parsed) return null;
+    const validLines = parsed.filter(p => !p.error);
+    const invalidLines = parsed.filter(p => p.error);
+    const total = validLines.reduce((s, p) => s + p.entries.reduce((s2, e) => s2 + e.amount, 0), 0);
+    return { validLines, invalidLines, total };
+  }, [parsed]);
+
+  const pasteBulk = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) { toast.error('Clipboard is empty'); return; }
+      setBulkText(prev => (prev.trim() ? `${prev}\n${text}` : text));
+      setParsed(null);
+    } catch {
+      toast.error('Could not read clipboard — check browser permissions');
+    }
+  };
+
+  const clearBulk = () => {
+    setBulkText('');
+    setParsed(null);
+  };
+
+  // Drops only the invalid lines, leaving valid ones in the box to
+  // re-parse/submit — distinct from Clear, which wipes everything.
+  const clearInvalidBulk = () => {
+    if (!bulkStats) return;
+    setBulkText(bulkStats.validLines.map(p => p.raw).join('\n'));
+    setParsed(bulkStats.validLines.length ? bulkStats.validLines : null);
+    toast.success('Invalid lines cleared');
+  };
+
   const submitBulk = async () => {
     if (!parsed) return;
-    const validLines = parsed.filter(p => !p.error);
-    if (!validLines.length) { toast.error('No valid lines to submit'); return; }
-
+    // Map each flat bet entry back to its index in the FULL `parsed` array
+    // (not just the valid subset) so that after submission we can rebuild
+    // bulkText from exactly the lines that still need attention. Format-
+    // invalid lines are never included in `flat` / submitted at all, so
+    // they must never be silently dropped from the box afterward.
     const flat: { number: string; amount: number }[] = [];
-    const lineForFlatIndex: number[] = [];
-    validLines.forEach((p, li) => {
-      p.entries.forEach(e => { flat.push({ number: e.number, amount: e.amount }); lineForFlatIndex.push(li); });
+    const ownerIndex: number[] = [];
+    parsed.forEach((p, idx) => {
+      if (p.error) return;
+      p.entries.forEach(e => { flat.push({ number: e.number, amount: e.amount }); ownerIndex.push(idx); });
     });
 
+    if (!flat.length) { toast.error('No valid lines to submit'); setShowBulkConfirm(false); return; }
+
     const res = await submitBetEntries(flat);
+    setShowBulkConfirm(false);
     if (res.error) { toast.error(res.error); return; }
 
     if (res.insertedCount > 0) {
       toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
     }
 
-    const failedLineIndices = new Set<number>();
+    const failedOriginalIndices = new Set<number>();
     res.results.forEach((r, i) => {
-      if (r.status === 'error') failedLineIndices.add(lineForFlatIndex[i]);
+      if (r.status === 'error') failedOriginalIndices.add(ownerIndex[i]);
     });
 
-    if (failedLineIndices.size > 0) {
-      const remaining: ParsedLine[] = [];
-      validLines.forEach((p, li) => {
-        if (failedLineIndices.has(li)) {
+    // Keep: lines that were format/limit-invalid to begin with, plus any
+    // valid-looking lines the server itself rejected (attach its message).
+    // Drop: lines that submitted successfully.
+    const remaining = parsed
+      .map((p, idx) => {
+        if (!p.error && !failedOriginalIndices.has(idx)) return null;
+        if (failedOriginalIndices.has(idx) && !p.error) {
           const errs = res.results
-            .filter((r, i) => lineForFlatIndex[i] === li && r.status === 'error')
+            .filter((r, i) => ownerIndex[i] === idx && r.status === 'error')
             .map(r => r.message)
             .filter(Boolean);
-          remaining.push({ ...p, error: errs.join('; ') || 'Rejected by server' });
+          return { ...p, error: errs.join('; ') || 'Rejected by server' };
         }
-      });
-      const clientInvalid = parsed.filter(p => p.error);
-      setParsed([...remaining, ...clientInvalid]);
-      toast.error(`${failedLineIndices.size} line${failedLineIndices.size !== 1 ? 's' : ''} rejected — see details below`);
-    } else {
-      setBulkText('');
-      setParsed(null);
+        return p;
+      })
+      .filter((p): p is ParsedLine => p !== null);
+
+    if (failedOriginalIndices.size > 0) {
+      toast.error(`${failedOriginalIndices.size} line${failedOriginalIndices.size !== 1 ? 's' : ''} rejected — see details below`);
     }
+
+    setBulkText(remaining.map(p => p.raw).join('\n'));
+    setParsed(remaining.length ? remaining : null);
   };
 
   const submitSingle = async () => {
@@ -399,7 +446,21 @@ export function UserLayout() {
 
                 {mode === 'bulk' ? (
                   <div className="rounded-xl p-5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                    <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 10 }}>BULK ENTRY</p>
+                    <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                      <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em' }}>BULK ENTRY</p>
+                      <div className="flex gap-2">
+                        <button onClick={pasteBulk}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+                          style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                          <ClipboardPaste size={12} /> Paste
+                        </button>
+                        <button onClick={clearBulk}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+                          style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                          <Trash2 size={12} /> Clear
+                        </button>
+                      </div>
+                    </div>
                     <div className="p-3 rounded-lg mb-3" style={{ background: C.card2, border: `1px solid ${C.borderSubtle}` }}>
                       <p style={{ color: C.textDim, fontSize: 10, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 4 }}>SUPPORTED FORMATS</p>
                       <p style={{ color: C.textMuted, fontSize: 11, lineHeight: 1.6, fontFamily: 'monospace' }}>
@@ -420,18 +481,61 @@ export function UserLayout() {
                         Parse & Validate
                       </button>
                       {parsed && (
-                        <button onClick={submitBulk}
+                        <button
+                          onClick={() => {
+                            if (!bulkStats || bulkStats.validLines.length === 0) { toast.error('No valid lines to submit'); return; }
+                            setShowBulkConfirm(true);
+                          }}
                           className="flex-1 py-2.5 rounded-xl"
-                          style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-                          Submit Valid Lines ({parsed.filter(p => !p.error).length})
+                          style={{
+                            background: C.goldGrad, color: '#000', border: 'none',
+                            cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                            opacity: bulkStats && bulkStats.validLines.length === 0 ? 0.5 : 1,
+                          }}>
+                          Submit Valid Lines ({bulkStats?.validLines.length ?? 0})
                         </button>
                       )}
                     </div>
 
                     {/* Parse results */}
-                    {parsed && (
+                    {parsed && bulkStats && (
                       <div className="mt-4 space-y-2">
                         <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em' }}>PARSE RESULTS</p>
+
+                        {/* Valid-total summary — the count/amount a submit will actually send */}
+                        <div className="flex items-center justify-between gap-2 p-3 rounded-xl flex-wrap"
+                          style={{ background: C.greenBg, border: `1px solid ${C.green}33` }}>
+                          <span style={{ color: C.greenText, fontSize: 12, fontWeight: 700 }}>
+                            {bulkStats.validLines.length} valid entr{bulkStats.validLines.length === 1 ? 'y' : 'ies'} · Total: {bulkStats.total.toLocaleString()}
+                          </span>
+                          {bulkStats.invalidLines.length > 0 && (
+                            <span style={{ color: C.redText, fontSize: 12, fontWeight: 600 }}>
+                              {bulkStats.invalidLines.length} invalid line{bulkStats.invalidLines.length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Quick-fix: strip only the invalid lines, keep valid ones in the box */}
+                        {bulkStats.invalidLines.length > 0 && (
+                          <div className="p-3 rounded-xl" style={{ background: C.redBg, border: `1px solid ${C.red}33` }}>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span style={{ color: C.redText, fontSize: 11, fontWeight: 700 }}>Invalid lines</span>
+                              <button onClick={clearInvalidBulk}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
+                                style={{ background: C.card, color: C.redText, border: `1px solid ${C.red}44`, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                                <Scissors size={11} /> Clear Invalid
+                              </button>
+                            </div>
+                            <div className="space-y-1">
+                              {bulkStats.invalidLines.map((p, i) => (
+                                <code key={i} style={{ display: 'block', color: C.redText, fontSize: 11, fontFamily: 'monospace' }}>
+                                  {p.raw || '(blank)'}
+                                </code>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {parsed.map((p, i) => (
                           <div key={i} className="p-3 rounded-xl"
                             style={{ background: p.error ? C.redBg : C.greenBg, border: `1px solid ${p.error ? C.red : C.green}33` }}>
@@ -456,6 +560,41 @@ export function UserLayout() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Confirm-before-submit — bulk entries are money, so make sure
+                        the user knows exactly what's about to go in, and that any
+                        invalid lines are being left behind on purpose. */}
+                    {showBulkConfirm && bulkStats && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+                        <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                          <h2 style={{ color: C.text, fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
+                            Submit Valid Lines?
+                          </h2>
+                          <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 6 }}>
+                            This will submit <strong>{bulkStats.validLines.length}</strong> valid line{bulkStats.validLines.length !== 1 ? 's' : ''} totaling{' '}
+                            <strong>{bulkStats.total.toLocaleString()}</strong>.
+                          </p>
+                          {bulkStats.invalidLines.length > 0 && (
+                            <p style={{ color: C.redText, fontSize: 12, marginBottom: 6 }}>
+                              {bulkStats.invalidLines.length} invalid line{bulkStats.invalidLines.length !== 1 ? 's' : ''} will NOT be submitted and will stay in the box for you to fix.
+                            </p>
+                          )}
+                          <p style={{ color: C.textDim, fontSize: 11, marginBottom: 20 }}>
+                            Only the valid lines above will be sent. Continue?
+                          </p>
+                          <div className="flex gap-3">
+                            <button onClick={() => setShowBulkConfirm(false)} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 13 }}>
+                              Cancel
+                            </button>
+                            <button onClick={submitBulk} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                              Confirm Submit
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
