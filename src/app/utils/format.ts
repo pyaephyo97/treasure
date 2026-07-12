@@ -23,6 +23,17 @@ export function formatIndexValueLines(rows: IndexValueRow[], sortMode: IndexValu
   return sortIndexValueRows(rows, sortMode).map(r => `${r.number} = ${r.amount}`).join('\n');
 }
 
+/** "Win #46=500 × 3×" — the winning number, the bet/share amount actually
+ * held on it, and the payout multiplier behind a Payout figure. Every P&L
+ * report (Admin/User/Partner, live and historical, card and plain-text)
+ * uses this so "Payout" is never just a bare total — it always shows its
+ * work. Returns null before a winning number is set, since there's nothing
+ * to show yet. */
+export function formatPayoutDetail(winNum: string | null, heldAmount: number, payoutRate: number): string | null {
+  if (!winNum) return null;
+  return `Win #${winNum}=${heldAmount.toLocaleString()} × ${payoutRate}×`;
+}
+
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);

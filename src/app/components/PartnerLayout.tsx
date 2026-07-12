@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useApp } from '../context';
 import { C } from '../theme';
 import type { PartnerShare, AdminPnl } from '../types';
-import { formatIndexValueLines, sortIndexValueRows, copyToClipboard, type IndexValueSort } from '../utils/format';
+import { formatIndexValueLines, sortIndexValueRows, copyToClipboard, formatPayoutDetail, type IndexValueSort } from '../utils/format';
 import { useCountdownMs, formatCountdown } from '../utils/countdown';
 
 type Tab = 'data' | 'report';
@@ -159,6 +159,7 @@ export function PartnerLayout() {
     : 0;
   const payout = winNum && partner ? heldOnWin * partner.payoutRate : 0;
   const pnl = net - payout;
+  const payoutDetail = formatPayoutDetail(winNum, heldOnWin, partner?.payoutRate ?? 0);
 
   // Report tab figures for whichever session is selected — server-
   // authoritative calculate_pnl result for a past session, live-computed
@@ -169,6 +170,10 @@ export function PartnerLayout() {
   const reportNet = viewingPastSession ? (historicalPnl?.netIntake ?? 0) : net;
   const reportPayout = viewingPastSession ? (historicalPnl?.payout ?? 0) : payout;
   const reportPnl = viewingPastSession ? (historicalPnl?.netPnl ?? 0) : pnl;
+  // viewedAllReceivedRows already covers both live and historical shares by
+  // number (see its definition above), so the same lookup works for either.
+  const reportHeldOnWin = reportWinNum ? (viewedAllReceivedRows.find(r => r.number === reportWinNum)?.amount ?? 0) : 0;
+  const reportPayoutDetail = formatPayoutDetail(reportWinNum, reportHeldOnWin, partner?.payoutRate ?? 0);
 
   const fmt = (n: number) => n.toLocaleString();
 
@@ -233,10 +238,10 @@ export function PartnerLayout() {
     lines.push(`Gross Received: ${fmt(reportGross)}`);
     lines.push(`Commission (${partner?.commissionRate ?? 0}%): ${fmt(Math.round(reportCommission))}`);
     lines.push(`Net Intake: ${fmt(Math.round(reportNet))}`);
-    lines.push(`Payout (Win #${reportWinNum ?? '—'}): ${reportWinNum ? fmt(reportPayout) : '—'}`);
+    lines.push(`Payout${reportPayoutDetail ? ` (${reportPayoutDetail})` : ''}: ${reportWinNum ? fmt(reportPayout) : '—'}`);
     lines.push(`Net P&L: ${reportWinNum ? `${reportPnl >= 0 ? '+' : ''}${fmt(Math.round(reportPnl))}` : '—'}`);
     return lines.join('\n');
-  }, [viewedAllReceivedRows, session, viewedSession, reportWinNum, partner, reportGross, reportCommission, reportNet, reportPayout, reportPnl, subLimit]);
+  }, [viewedAllReceivedRows, session, viewedSession, reportWinNum, partner, reportGross, reportCommission, reportNet, reportPayout, reportPayoutDetail, reportPnl, subLimit]);
 
   const copyReport = async () => {
     try {
@@ -579,7 +584,7 @@ export function PartnerLayout() {
                   { label: 'Gross Received', val: fmt(gross), color: C.text },
                   { label: `Commission (${partner?.commissionRate ?? 0}%)`, val: `-${fmt(Math.round(commission))}`, color: C.orangeText },
                   { label: 'Net Intake', val: fmt(Math.round(net)), color: C.blueText },
-                  { label: `Payout on #${winNum} × ${partner?.payoutRate ?? 80}×`, val: `-${fmt(payout)}`, color: C.redText },
+                  { label: `Payout${payoutDetail ? ` (${payoutDetail})` : ''}`, val: `-${fmt(payout)}`, color: C.redText },
                   { label: 'Net P&L', val: `${pnl >= 0 ? '+' : ''}${fmt(Math.round(pnl))}`, color: pnl >= 0 ? C.greenText : C.redText },
                 ].map((row, i) => (
                   <div key={i} className="flex justify-between py-2" style={{ borderBottom: i < 4 ? `1px solid ${C.borderSubtle}` : 'none' }}>
@@ -663,7 +668,7 @@ export function PartnerLayout() {
                   { label: 'Gross Received', val: fmt(reportGross), color: C.text },
                   { label: `Commission (${partner?.commissionRate ?? 0}%)`, val: `-${fmt(Math.round(reportCommission))}`, color: C.orangeText },
                   { label: 'Net Intake', val: fmt(Math.round(reportNet)), color: C.blueText },
-                  { label: `Payout (Win #${reportWinNum ?? '—'} × ${partner?.payoutRate ?? 80}×)`, val: reportWinNum ? fmt(reportPayout) : '—', color: C.redText },
+                  { label: `Payout${reportPayoutDetail ? ` (${reportPayoutDetail})` : ''}`, val: reportWinNum ? fmt(reportPayout) : '—', color: C.redText },
                   { label: 'Net P&L', val: reportWinNum ? `${reportPnl >= 0 ? '+' : ''}${fmt(Math.round(reportPnl))}` : '—', color: reportPnl >= 0 ? C.greenText : C.redText },
                 ].map((row, i) => (
                   <div key={i} className="flex justify-between">

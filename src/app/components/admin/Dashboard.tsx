@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Users, Handshake, Activity, AlertTriangle, Share2, DollarSign } from 'lucide-react';
 import { useApp } from '../../context';
 import { C } from '../../theme';
+import { formatPayoutDetail } from '../../utils/format';
 
 function StatCard({ icon: Icon, label, value, sub, color, bg }: {
   icon: any; label: string; value: string; sub?: string; color: string; bg: string;
@@ -59,6 +60,16 @@ export function Dashboard() {
   const netIntake = adminPnl?.netIntake ?? (totalAmount - localCommissionTotal);
   const payout = adminPnl?.payout ?? 0;
   const pnl = adminPnl?.netPnl ?? 0;
+
+  // Same payout basis calculate_pnl uses for the admin/master_admin branch:
+  // bets on the winning number minus whatever was already shared away to
+  // partners — shown so the Payout line always says its work.
+  const totalSharedOnWin = useMemo(() =>
+    winNum ? partnerShares.filter(ps => ps.number === winNum).reduce((s, ps) => s + ps.sharedAmount, 0) : 0,
+    [winNum, partnerShares]
+  );
+  const heldOnWin = winNum ? (byNumber[winNum] || 0) - totalSharedOnWin : 0;
+  const payoutDetail = formatPayoutDetail(winNum, heldOnWin, myProfile?.payoutRate ?? 0);
 
   const fmt = (n: number) => n.toLocaleString();
 
@@ -119,7 +130,7 @@ export function Dashboard() {
             { label: 'Gross Intake', val: fmt(totalAmount), color: C.text },
             { label: 'Commission Total', val: `-${fmt(Math.round(commissionTotal))}`, color: C.orangeText },
             { label: 'Net Intake', val: fmt(Math.round(netIntake)), color: C.blueText },
-            { label: `Payout${winNum ? ` (#${winNum})` : ''}`, val: winNum ? `-${fmt(payout)}` : '—', color: C.redText },
+            { label: `Payout${payoutDetail ? ` (${payoutDetail})` : ''}`, val: winNum ? `-${fmt(payout)}` : '—', color: C.redText },
             { label: 'Net P&L', val: winNum ? `${pnl >= 0 ? '+' : ''}${fmt(Math.round(pnl))}` : '—', color: pnl >= 0 ? C.greenText : C.redText },
           ].map((row, i) => (
             <div key={i} className="flex justify-between py-2"

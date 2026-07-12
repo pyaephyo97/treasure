@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useApp } from '../../context';
 import { C } from '../../theme';
-import { formatIndexValueLines } from '../../utils/format';
+import { formatIndexValueLines, formatPayoutDetail } from '../../utils/format';
 import type { BetEntry, PartnerShare, AdminPnl } from '../../types';
 
 const fmt = (n: number) => n.toLocaleString();
 
-type PnlRow = { id: string; username: string; gross: number; commission: number; net: number; payout: number; pnl: number | null };
+type PnlRow = { id: string; username: string; gross: number; commission: number; net: number; heldOnWin: number; payoutRate: number; payout: number; pnl: number | null };
 
 const PNL_TABLE_HEADERS = ['NAME', 'GROSS', 'COMMISSION', 'NET', 'PAYOUT', 'P&L'];
 
@@ -18,7 +18,7 @@ const PNL_TABLE_HEADERS = ['NAME', 'GROSS', 'COMMISSION', 'NET', 'PAYOUT', 'P&L'
  * every render, which would otherwise force React to unmount/remount the
  * whole table (losing scroll position, flicker) on every keystroke or
  * state change elsewhere on the page. */
-function PnlTable({ title, rows, loading }: { title: string; rows: PnlRow[]; loading: boolean }) {
+function PnlTable({ title, rows, loading, winNum }: { title: string; rows: PnlRow[]; loading: boolean; winNum: string | null }) {
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}` }}>
       <div className="px-5 py-3" style={{ borderBottom: `1px solid ${C.border}`, background: C.card2 }}>
@@ -44,7 +44,14 @@ function PnlTable({ title, rows, loading }: { title: string; rows: PnlRow[]; loa
                 <td style={{ padding: '9px 14px', textAlign: 'right' }}><span style={{ color: C.text, fontSize: 13 }}>{fmt(r.gross)}</span></td>
                 <td style={{ padding: '9px 14px', textAlign: 'right' }}><span style={{ color: C.orangeText, fontSize: 13 }}>{r.gross > 0 ? `-${fmt(Math.round(r.commission))}` : '—'}</span></td>
                 <td style={{ padding: '9px 14px', textAlign: 'right' }}><span style={{ color: C.blueText, fontSize: 13 }}>{fmt(Math.round(r.net))}</span></td>
-                <td style={{ padding: '9px 14px', textAlign: 'right' }}><span style={{ color: C.redText, fontSize: 13 }}>{r.pnl !== null ? fmt(r.payout) : '—'}</span></td>
+                <td style={{ padding: '9px 14px', textAlign: 'right' }}>
+                  <span style={{ color: C.redText, fontSize: 13 }}>{r.pnl !== null ? fmt(r.payout) : '—'}</span>
+                  {r.pnl !== null && (
+                    <p style={{ color: C.textDim, fontSize: 10, marginTop: 1 }}>
+                      {formatPayoutDetail(winNum, r.heldOnWin, r.payoutRate)}
+                    </p>
+                  )}
+                </td>
                 <td style={{ padding: '9px 14px', textAlign: 'right' }}>
                   <span style={{ color: r.pnl === null ? C.textDim : r.pnl >= 0 ? C.greenText : C.redText, fontSize: 13, fontWeight: 700 }}>
                     {r.pnl !== null ? `${r.pnl >= 0 ? '+' : ''}${fmt(Math.round(r.pnl))}` : '—'}
@@ -141,6 +148,12 @@ export function AdminReports() {
   const net = viewedAdminPnl?.netIntake ?? (localGross - localCommTotal);
   const payout = viewedAdminPnl?.payout ?? 0;
   const pnl = viewedAdminPnl?.netPnl ?? 0;
+  // Same payout basis calculate_pnl uses for the admin/master_admin branch:
+  // bets on the winning number minus whatever was already shared away to
+  // partners — shown so the Payout line always says its work, not just a
+  // bare total.
+  const adminHeldOnWin = winNum ? (byNumber[winNum] || 0) - (sharedByNumber[winNum] || 0) : 0;
+  const adminPayoutDetail = formatPayoutDetail(winNum, adminHeldOnWin, myProfile?.payoutRate ?? 0);
 
   // Per-User and per-Partner P&L — same math calculate_pnl uses for a
   // 'user'/'partner' target (gross -> own commission rate -> net; payout =
@@ -161,7 +174,7 @@ export function AdminReports() {
       const net = agg.gross - commission;
       const payout = winNum ? agg.winGross * (u.payoutRate ?? 0) : 0;
       const rowPnl = winNum ? net - payout : null;
-      return { id: u.id, username: u.username, gross: agg.gross, commission, net, payout, pnl: rowPnl };
+      return { id: u.id, username: u.username, gross: agg.gross, commission, net, heldOnWin: agg.winGross, payoutRate: u.payoutRate ?? 0, payout, pnl: rowPnl };
     }).sort((a, b) => a.username.localeCompare(b.username));
   }, [viewedBetEntries, users, winNum]);
 
@@ -178,7 +191,7 @@ export function AdminReports() {
       const net = agg.gross - commission;
       const payout = winNum ? agg.winGross * (p.payoutRate ?? 0) : 0;
       const rowPnl = winNum ? net - payout : null;
-      return { id: p.id, username: p.username, gross: agg.gross, commission, net, payout, pnl: rowPnl };
+      return { id: p.id, username: p.username, gross: agg.gross, commission, net, heldOnWin: agg.winGross, payoutRate: p.payoutRate ?? 0, payout, pnl: rowPnl };
     }).sort((a, b) => a.username.localeCompare(b.username));
   }, [viewedPartnerShares, partners, winNum]);
 
@@ -208,7 +221,7 @@ export function AdminReports() {
     lines.push(`Gross Intake: ${fmt(gross)}`);
     lines.push(`Commission Total: ${fmt(Math.round(commTotal))}`);
     lines.push(`Net Intake: ${fmt(Math.round(net))}`);
-    lines.push(`Payout (Win #${winNum ?? '—'}): ${winNum ? fmt(payout) : '—'}`);
+    lines.push(`Payout${adminPayoutDetail ? ` (${adminPayoutDetail})` : ''}: ${winNum ? fmt(payout) : '—'}`);
     lines.push(`Net P&L: ${winNum ? `${pnl >= 0 ? '+' : ''}${fmt(Math.round(pnl))}` : '—'}`);
 
     lines.push('─'.repeat(40));
@@ -217,7 +230,8 @@ export function AdminReports() {
       lines.push('(no users)');
     } else {
       userPnlRows.forEach(r => {
-        lines.push(`${r.username}: gross ${fmt(r.gross)}, comm -${fmt(Math.round(r.commission))}, net ${fmt(Math.round(r.net))}, payout ${r.pnl !== null ? fmt(r.payout) : '—'}, P&L ${r.pnl !== null ? `${r.pnl >= 0 ? '+' : ''}${fmt(Math.round(r.pnl))}` : '—'}`);
+        const detail = formatPayoutDetail(winNum, r.heldOnWin, r.payoutRate);
+        lines.push(`${r.username}: gross ${fmt(r.gross)}, comm -${fmt(Math.round(r.commission))}, net ${fmt(Math.round(r.net))}, payout${detail ? ` (${detail})` : ''} ${r.pnl !== null ? fmt(r.payout) : '—'}, P&L ${r.pnl !== null ? `${r.pnl >= 0 ? '+' : ''}${fmt(Math.round(r.pnl))}` : '—'}`);
       });
     }
 
@@ -227,12 +241,13 @@ export function AdminReports() {
       lines.push('(no partners)');
     } else {
       partnerPnlRows.forEach(r => {
-        lines.push(`${r.username}: gross ${fmt(r.gross)}, comm -${fmt(Math.round(r.commission))}, net ${fmt(Math.round(r.net))}, payout ${r.pnl !== null ? fmt(r.payout) : '—'}, P&L ${r.pnl !== null ? `${r.pnl >= 0 ? '+' : ''}${fmt(Math.round(r.pnl))}` : '—'}`);
+        const detail = formatPayoutDetail(winNum, r.heldOnWin, r.payoutRate);
+        lines.push(`${r.username}: gross ${fmt(r.gross)}, comm -${fmt(Math.round(r.commission))}, net ${fmt(Math.round(r.net))}, payout${detail ? ` (${detail})` : ''} ${r.pnl !== null ? fmt(r.payout) : '—'}, P&L ${r.pnl !== null ? `${r.pnl >= 0 ? '+' : ''}${fmt(Math.round(r.pnl))}` : '—'}`);
       });
     }
 
     return lines.join('\n');
-  }, [rows, session, viewedSession, winNum, gross, commTotal, net, payout, pnl, userPnlRows, partnerPnlRows]);
+  }, [rows, session, viewedSession, winNum, gross, commTotal, net, payout, pnl, adminPayoutDetail, userPnlRows, partnerPnlRows]);
 
   const copy = async () => {
     try {
@@ -340,7 +355,7 @@ export function AdminReports() {
             { label: 'Gross Intake', val: fmt(gross), color: C.text },
             { label: 'Commission Total', val: `-${fmt(Math.round(commTotal))}`, color: C.orangeText },
             { label: 'Net Intake', val: fmt(Math.round(net)), color: C.blueText },
-            { label: `Payout (Win #${winNum ?? '—'})`, val: winNum ? `-${fmt(payout)}` : '—', color: C.redText },
+            { label: `Payout${adminPayoutDetail ? ` (${adminPayoutDetail})` : ''}`, val: winNum ? `-${fmt(payout)}` : '—', color: C.redText },
             { label: 'Net P&L', val: winNum ? `${pnl >= 0 ? '+' : ''}${fmt(Math.round(pnl))}` : '—', color: pnl >= 0 ? C.greenText : C.redText },
           ].map((row, i) => (
             <div key={i} className="flex justify-between">
@@ -352,8 +367,8 @@ export function AdminReports() {
       </div>
 
       {/* User P&L + Partner P&L */}
-      <PnlTable title={`USER P&L — ${userPnlRows.length} MANAGED`} rows={userPnlRows} loading={loadingHistory} />
-      <PnlTable title={`PARTNER P&L — ${partnerPnlRows.length} MANAGED`} rows={partnerPnlRows} loading={loadingHistory} />
+      <PnlTable title={`USER P&L — ${userPnlRows.length} MANAGED`} rows={userPnlRows} loading={loadingHistory} winNum={winNum} />
+      <PnlTable title={`PARTNER P&L — ${partnerPnlRows.length} MANAGED`} rows={partnerPnlRows} loading={loadingHistory} winNum={winNum} />
 
       {/* Plain text preview */}
       <div className="rounded-xl p-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>

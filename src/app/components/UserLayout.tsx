@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useApp } from '../context';
 import { C } from '../theme';
 import type { BetEntry, AdminPnl } from '../types';
-import { formatIndexValueLines } from '../utils/format';
+import { formatIndexValueLines, formatPayoutDetail } from '../utils/format';
 import { useCountdownMs, formatCountdown } from '../utils/countdown';
 
 type Tab = 'entry' | 'history' | 'invoice';
@@ -261,10 +261,10 @@ export function UserLayout() {
   const grossBet = myEntries.reduce((s, e) => s + e.amount, 0);
   const commission = user ? grossBet * user.commissionRate / 100 : 0;
   const netPayable = grossBet - commission;
-  const payoutAmt = winNum && user
-    ? myEntries.filter(e => e.number === winNum).reduce((s, e) => s + e.amount, 0) * user.payoutRate
-    : 0;
+  const winHeldAmt = winNum ? myEntries.filter(e => e.number === winNum).reduce((s, e) => s + e.amount, 0) : 0;
+  const payoutAmt = winNum && user ? winHeldAmt * user.payoutRate : 0;
   const pnl = netPayable - payoutAmt;
+  const payoutDetail = formatPayoutDetail(winNum, winHeldAmt, user?.payoutRate ?? 0);
 
   const invoiceText = useMemo(() => {
     const fmt = (n: number) => n.toLocaleString();
@@ -280,10 +280,10 @@ export function UserLayout() {
     lines.push(`Gross Bet Total: ${fmt(grossBet)}`);
     lines.push(`Commission (${user?.commissionRate ?? 0}%): ${fmt(Math.round(commission))}`);
     lines.push(`Net Payable: ${fmt(Math.round(netPayable))}`);
-    lines.push(`Payout (Win #${winNum ?? '—'}): ${winNum ? fmt(payoutAmt) : '—'}`);
+    lines.push(`Payout${payoutDetail ? ` (${payoutDetail})` : ''}: ${winNum ? fmt(payoutAmt) : '—'}`);
     lines.push(`Net P&L: ${winNum ? `${pnl >= 0 ? '+' : ''}${fmt(Math.round(pnl))}` : '—'}`);
     return lines.join('\n');
-  }, [myEntries, session, winNum, user, grossBet, commission, netPayable, payoutAmt, pnl]);
+  }, [myEntries, session, winNum, user, grossBet, commission, netPayable, payoutAmt, payoutDetail, pnl]);
 
   const copyInvoice = async () => {
     try {
@@ -718,13 +718,24 @@ export function UserLayout() {
                 <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 12 }}>
                   P&L — {viewedSession?.label}
                 </p>
-                {[
-                  { label: 'Gross Bet Total', val: fmt(historicalPnl.grossIntake), color: C.text },
-                  { label: 'Commission', val: `-${fmt(Math.round(historicalPnl.commissionTotal))}`, color: C.orangeText },
-                  { label: 'Net Payable', val: fmt(Math.round(historicalPnl.netIntake)), color: C.blueText },
-                  { label: 'Payout', val: historicalPnl.winningNumberSet ? fmt(historicalPnl.payout ?? 0) : '—', color: C.greenText },
-                  { label: 'Net P&L', val: historicalPnl.winningNumberSet ? `${(historicalPnl.netPnl ?? 0) >= 0 ? '+' : ''}${fmt(Math.round(historicalPnl.netPnl ?? 0))}` : '—', color: (historicalPnl.netPnl ?? 0) >= 0 ? C.greenText : C.redText },
-                ].map((row, i) => (
+                {(() => {
+                  // historicalEntries is already scoped to this user (fetched
+                  // filtered by currentUserId), so summing it by the past
+                  // session's winning number gives the same held-on-win basis
+                  // calculate_pnl used server-side.
+                  const pastWinNum = viewedSession?.winningNumber ?? null;
+                  const pastHeldAmt = pastWinNum
+                    ? (historicalEntries ?? []).filter(e => e.number === pastWinNum).reduce((s, e) => s + e.amount, 0)
+                    : 0;
+                  const pastPayoutDetail = formatPayoutDetail(pastWinNum, pastHeldAmt, user?.payoutRate ?? 0);
+                  return [
+                    { label: 'Gross Bet Total', val: fmt(historicalPnl.grossIntake), color: C.text },
+                    { label: 'Commission', val: `-${fmt(Math.round(historicalPnl.commissionTotal))}`, color: C.orangeText },
+                    { label: 'Net Payable', val: fmt(Math.round(historicalPnl.netIntake)), color: C.blueText },
+                    { label: `Payout${pastPayoutDetail ? ` (${pastPayoutDetail})` : ''}`, val: historicalPnl.winningNumberSet ? fmt(historicalPnl.payout ?? 0) : '—', color: C.greenText },
+                    { label: 'Net P&L', val: historicalPnl.winningNumberSet ? `${(historicalPnl.netPnl ?? 0) >= 0 ? '+' : ''}${fmt(Math.round(historicalPnl.netPnl ?? 0))}` : '—', color: (historicalPnl.netPnl ?? 0) >= 0 ? C.greenText : C.redText },
+                  ];
+                })().map((row, i) => (
                   <div key={i} className="flex justify-between py-1.5" style={{ borderBottom: i < 4 ? `1px solid ${C.borderSubtle}` : 'none' }}>
                     <span style={{ color: C.textMuted, fontSize: 13 }}>{row.label}</span>
                     <span style={{ color: row.color, fontSize: 13, fontWeight: i === 4 ? 800 : 600 }}>{row.val}</span>
@@ -787,7 +798,7 @@ export function UserLayout() {
                   { label: 'Gross Bet Total', val: fmt(grossBet), color: C.text },
                   { label: `Commission (${user?.commissionRate ?? 0}%)`, val: `-${fmt(Math.round(commission))}`, color: C.orangeText },
                   { label: 'Net Payable', val: fmt(Math.round(netPayable)), color: C.blueText },
-                  { label: `Payout (Win #${winNum ?? '—'} × ${user?.payoutRate ?? 80}×)`, val: winNum ? fmt(payoutAmt) : '—', color: C.greenText },
+                  { label: `Payout${payoutDetail ? ` (${payoutDetail})` : ''}`, val: winNum ? fmt(payoutAmt) : '—', color: C.greenText },
                   { label: 'Net P&L', val: winNum ? `${pnl >= 0 ? '+' : ''}${fmt(Math.round(pnl))}` : '—', color: pnl >= 0 ? C.greenText : C.redText },
                 ].map((row, i) => (
                   <div key={i} className="flex justify-between">

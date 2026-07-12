@@ -3,6 +3,7 @@ import { Trophy, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../../context';
 import { C } from '../../theme';
+import { formatPayoutDetail } from '../../utils/format';
 
 function PnLRow({ label, value, color, bold }: { label: string; value: string; color?: string; bold?: boolean }) {
   return (
@@ -14,7 +15,7 @@ function PnLRow({ label, value, color, bold }: { label: string; value: string; c
 }
 
 export function WinningNumber() {
-  const { session, setWinningNumber, users, betEntries, partners, partnerShares, adminPnl } = useApp();
+  const { session, setWinningNumber, users, betEntries, partners, partnerShares, adminPnl, myProfile } = useApp();
   const [input, setInput] = useState('');
   const [confirm, setConfirm] = useState(false);
   // When a winning number is already locked in, "Change Number" reveals the
@@ -42,6 +43,17 @@ export function WinningNumber() {
 
   const winNum = session.winningNumber;
   const showInputForm = !winNum || editing;
+
+  // Admin's own payout basis, matching calculate_pnl: bets managed users
+  // placed on the winning number, minus whatever portion of that was
+  // already shared away to partners (that share belongs to the partner's
+  // own payout basis instead, not double-counted here).
+  const adminHeldOnWin = useMemo(() => {
+    if (!winNum) return 0;
+    const winBets = betEntries.filter(e => e.number === winNum).reduce((s, e) => s + e.amount, 0);
+    const winShared = partnerShares.filter(ps => ps.number === winNum).reduce((s, ps) => s + ps.sharedAmount, 0);
+    return winBets - winShared;
+  }, [winNum, betEntries, partnerShares]);
 
   const userPnLs = useMemo(() => {
     if (!winNum) return [];
@@ -193,7 +205,12 @@ export function WinningNumber() {
           <PnLRow label="Gross Intake" value={fmt(adminPnl.grossIntake)} />
           <PnLRow label="Commission Total" value={`-${fmt(Math.round(adminPnl.commissionTotal))}`} color={C.orangeText} />
           <PnLRow label="Net Intake" value={fmt(Math.round(adminPnl.netIntake))} color={C.blueText} />
-          <PnLRow label="Payout" value={`-${fmt(adminPnl.payout ?? 0)}`} color={C.redText} />
+          {(() => {
+            const detail = formatPayoutDetail(winNum, adminHeldOnWin, myProfile?.payoutRate ?? 0);
+            return (
+              <PnLRow label={`Payout${detail ? ` (${detail})` : ''}`} value={`-${fmt(adminPnl.payout ?? 0)}`} color={C.redText} />
+            );
+          })()}
           <div className="flex justify-between items-center pt-3">
             <span style={{ color: C.text, fontSize: 14, fontWeight: 700 }}>NET P&L</span>
             <span style={{ fontSize: 18, fontWeight: 800, color: (adminPnl.netPnl ?? 0) >= 0 ? C.greenText : C.redText }}>
@@ -209,7 +226,7 @@ export function WinningNumber() {
           <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', paddingLeft: 2 }}>
             USER P&L — WINNING #{winNum}
           </p>
-          {userPnLs.map(({ account, gross, commission, net, payout, pnl }) => (
+          {userPnLs.map(({ account, gross, commission, net, heldOnWin, payout, pnl }) => (
             <div key={account.id} className="rounded-2xl p-5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
               <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 10 }}>
                 USER: {account.username.toUpperCase()}
@@ -221,7 +238,7 @@ export function WinningNumber() {
                   <PnLRow label="Gross Bets" value={fmt(gross)} />
                   <PnLRow label={`Commission (${account.commissionRate}%)`} value={`-${fmt(Math.round(commission))}`} color={C.orangeText} />
                   <PnLRow label="Net Intake" value={fmt(Math.round(net))} color={C.blueText} />
-                  <PnLRow label={`Payout on #${winNum}`} value={`-${fmt(payout)}`} color={C.redText} />
+                  <PnLRow label={`Payout (${formatPayoutDetail(winNum, heldOnWin, account.payoutRate)})`} value={`-${fmt(payout)}`} color={C.redText} />
                   <div className="flex justify-between items-center pt-3">
                     <span style={{ color: C.text, fontSize: 13, fontWeight: 700 }}>NET P&L</span>
                     <span style={{ fontSize: 16, fontWeight: 800, color: pnl >= 0 ? C.greenText : C.redText }}>
@@ -241,7 +258,7 @@ export function WinningNumber() {
           <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', paddingLeft: 2 }}>
             PARTNER P&L — WINNING #{winNum}
           </p>
-          {partnerPnLs.map(({ account, gross, commission, net, payout, pnl }) => (
+          {partnerPnLs.map(({ account, gross, commission, net, heldOnWin, payout, pnl }) => (
             <div key={account.id} className="rounded-2xl p-5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
               <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 10 }}>
                 PARTNER: {account.username.toUpperCase()}
@@ -253,7 +270,7 @@ export function WinningNumber() {
                   <PnLRow label="Gross Received" value={fmt(gross)} />
                   <PnLRow label={`Commission (${account.commissionRate}%)`} value={`-${fmt(Math.round(commission))}`} color={C.orangeText} />
                   <PnLRow label="Net Intake" value={fmt(Math.round(net))} color={C.blueText} />
-                  <PnLRow label={`Payout on #${winNum}`} value={`-${fmt(payout)}`} color={C.redText} />
+                  <PnLRow label={`Payout (${formatPayoutDetail(winNum, heldOnWin, account.payoutRate)})`} value={`-${fmt(payout)}`} color={C.redText} />
                   <div className="flex justify-between items-center pt-3">
                     <span style={{ color: C.text, fontSize: 13, fontWeight: 700 }}>NET P&L</span>
                     <span style={{ fontSize: 16, fontWeight: 800, color: pnl >= 0 ? C.greenText : C.redText }}>
