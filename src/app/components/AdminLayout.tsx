@@ -140,14 +140,20 @@ export function AdminLayout() {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        <header className="flex items-center gap-4 px-5 py-3 flex-shrink-0"
-          style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
-          <button className="md:hidden" onClick={() => setSidebarOpen(true)}
+        <header className="flex items-center gap-4 px-5 flex-shrink-0"
+          style={{
+            background: C.card, borderBottom: `1px solid ${C.border}`,
+            // env(safe-area-inset-top) keeps the bar clear of the notch/Dynamic
+            // Island when the PWA runs standalone on a phone; resolves to 0px
+            // everywhere else, so this is a no-op in a normal browser tab.
+            paddingTop: 'calc(12px + env(safe-area-inset-top, 0px))', paddingBottom: 12,
+          }}>
+          <button className="md:hidden flex-shrink-0" onClick={() => setSidebarOpen(true)}
             style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', padding: 4 }}>
             <Menu size={20} />
           </button>
-          <h1 style={{ color: C.text, fontSize: 15, fontWeight: 700, flex: 1 }}>{navLabel}</h1>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: C.goldDim }}>
+          <h1 className="min-w-0 truncate" style={{ color: C.text, fontSize: 15, fontWeight: 700, flex: 1 }}>{navLabel}</h1>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg flex-shrink-0" style={{ background: C.goldDim }}>
             <span style={{ color: C.gold, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
               {session.label}
             </span>
@@ -155,7 +161,8 @@ export function AdminLayout() {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6"
+          style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom, 0px))' }}>
           <Suspense fallback={<PageFallback />}>
             {page === 'dashboard'  && <Dashboard />}
             {page === 'accounts'   && <AccountManagement />}

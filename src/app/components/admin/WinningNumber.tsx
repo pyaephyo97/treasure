@@ -70,7 +70,9 @@ export function WinningNumber() {
   const fmt = (n: number) => n.toLocaleString();
   const fmtPnl = (n: number) => `${n >= 0 ? '+' : ''}${fmt(Math.round(n))}`;
 
-  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 13 };
+  // fontSize 16 is the iOS Safari auto-zoom threshold — anything smaller
+  // makes the whole page zoom in when the field is focused on a phone.
+  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 16 };
 
   return (
     <div className="space-y-5 max-w-2xl">
@@ -116,18 +118,25 @@ export function WinningNumber() {
               </div>
             )}
             <div className="flex gap-3">
+              {/* minWidth: 0 overrides the flex-item default of min-width:auto —
+                  without it, WebKit won't shrink a text input below its
+                  intrinsic width, which pushes this row wider than the
+                  screen and forces the whole page to scroll horizontally
+                  (and, combined with autoFocus, jump sideways on load) on
+                  narrow phones. */}
               <input
                 type="text"
+                inputMode="numeric"
                 maxLength={2}
                 value={input}
                 onChange={e => setInput(e.target.value.replace(/\D/g, ''))}
                 placeholder="00–99"
                 autoFocus
-                style={{ ...inp, flex: 1, fontSize: 24, fontWeight: 700, textAlign: 'center', letterSpacing: '0.1em' }}
+                style={{ ...inp, flex: 1, minWidth: 0, fontSize: 24, fontWeight: 700, textAlign: 'center', letterSpacing: '0.1em' }}
               />
               <button onClick={() => { if (!input) { toast.error('Enter a number'); return; } setConfirm(true); }}
-                className="px-6 py-3 rounded-xl"
-                style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 800 }}>
+                className="px-6 py-3 rounded-xl whitespace-nowrap"
+                style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 800, flexShrink: 0 }}>
                 {editing ? 'Update Number' : 'Set Number'}
               </button>
             </div>

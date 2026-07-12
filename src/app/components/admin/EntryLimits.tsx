@@ -130,7 +130,9 @@ export function EntryLimits() {
     setSelectedUsers([]);
   };
 
-  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 13 };
+  // fontSize 16 is the iOS Safari auto-zoom threshold — anything smaller
+  // makes the whole page zoom in when the field is focused on a phone.
+  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 16 };
 
   return (
     <div className="space-y-4 max-w-6xl">
@@ -141,11 +143,12 @@ export function EntryLimits() {
         <div className="flex gap-3 flex-wrap">
           <div className="flex-1 flex items-center gap-2" style={{ minWidth: 180 }}>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               value={defaultVal}
-              onChange={e => setDefaultVal(e.target.value)}
+              onChange={e => setDefaultVal(e.target.value.replace(/\D/g, ''))}
               placeholder="Default limit for all"
-              style={{ ...inp, flex: 1 }}
+              style={{ ...inp, flex: 1, minWidth: 0 }}
             />
             <button onClick={setDefault}
               className="flex items-center gap-2 px-4 py-2 rounded-lg whitespace-nowrap"
@@ -174,9 +177,10 @@ export function EntryLimits() {
           />
           <span style={{ color: C.textDim, fontSize: 13 }}>→ value</span>
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
             value={digitVal}
-            onChange={e => setDigitVal(e.target.value)}
+            onChange={e => setDigitVal(e.target.value.replace(/\D/g, ''))}
             placeholder="Limit value"
             style={{ ...inp, width: 140 }}
           />
@@ -204,9 +208,10 @@ export function EntryLimits() {
           />
           <span style={{ color: C.textDim, fontSize: 13 }}>→ value</span>
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
             value={exactVal}
-            onChange={e => setExactVal(e.target.value)}
+            onChange={e => setExactVal(e.target.value.replace(/\D/g, ''))}
             placeholder="Limit value"
             style={{ ...inp, width: 140 }}
           />
@@ -236,7 +241,7 @@ export function EntryLimits() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Filter number..."
-              style={{ background: 'none', border: 'none', outline: 'none', color: C.text, fontSize: 12, width: 90 }}
+              style={{ background: 'none', border: 'none', outline: 'none', color: C.text, fontSize: 16, width: 90 }}
             />
           </div>
           <button onClick={assignToAll} disabled={assigningAll}
@@ -280,12 +285,13 @@ export function EntryLimits() {
                     {editingRow === row.number ? (
                       <div className="flex items-center gap-2 flex-1 justify-end">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           autoFocus
                           value={editVal}
-                          onChange={e => setEditVal(e.target.value)}
+                          onChange={e => setEditVal(e.target.value.replace(/\D/g, ''))}
                           onKeyDown={e => { if (e.key === 'Enter') saveRow(row.number); if (e.key === 'Escape') setEditingRow(null); }}
-                          style={{ ...inp, width: 88, padding: '6px 8px', fontSize: 13 }}
+                          style={{ ...inp, width: 88, padding: '6px 8px', fontSize: 16 }}
                         />
                         <button onClick={() => saveRow(row.number)}
                           className="flex items-center justify-center"
