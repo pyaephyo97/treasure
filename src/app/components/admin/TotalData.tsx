@@ -206,7 +206,9 @@ export function TotalData() {
     setTimeout(() => setCopiedHistoryId(null), 2000);
   };
 
-  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 13 };
+  // fontSize 16 is the iOS Safari auto-zoom threshold — anything smaller
+  // makes the whole page zoom in when the field is focused on a phone.
+  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 16 };
 
   return (
     <div className="space-y-4">
@@ -237,21 +239,28 @@ export function TotalData() {
       </div>
 
       {/* Limit input */}
-      <div className="rounded-xl p-4 flex items-center gap-4" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-        <div>
+      {/* flex-wrap lets the input+button drop to their own row on narrow
+          phones instead of squeezing next to the description text; minWidth:
+          0 on the input stops WebKit from refusing to shrink it below its
+          native intrinsic width, which is what was forcing this whole row
+          (and the page) wider than the viewport. */}
+      <div className="rounded-xl p-4 flex items-center gap-4 flex-wrap" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+        <div style={{ minWidth: 200, flex: 1 }}>
           <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 4 }}>LIMIT THRESHOLD</p>
           <p style={{ color: C.textMuted, fontSize: 11 }}>Numbers exceeding this will appear in the Over Limit table</p>
         </div>
         <div className="flex items-center gap-2 ml-auto">
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
             value={limitInput}
-            onChange={e => setLimitInput(e.target.value)}
-            style={{ ...inp, width: 110 }}
+            onChange={e => setLimitInput(e.target.value.replace(/\D/g, ''))}
+            style={{ ...inp, width: 110, minWidth: 0 }}
           />
           <button onClick={applyLimitThreshold} disabled={applyingLimit}
+            className="whitespace-nowrap"
             style={{
-              background: C.goldGrad, color: '#000', border: 'none',
+              background: C.goldGrad, color: '#000', border: 'none', flexShrink: 0,
               cursor: applyingLimit ? 'not-allowed' : 'pointer', padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 700,
             }}>
             {applyingLimit ? 'Applying…' : 'Apply'}
@@ -299,7 +308,7 @@ export function TotalData() {
             </table>
           </div>
           <div className="px-4 py-3 space-y-3" style={{ borderTop: `1px solid ${C.border}` }}>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <span style={{ color: C.textMuted, fontSize: 12 }}>Within Total</span>
               <span style={{ color: C.textDim, fontSize: 11 }}>Count: {withinLimitRows.length}</span>
               <span style={{ color: C.greenText, fontSize: 13, fontWeight: 700 }}>{withinTotal.toLocaleString()}</span>
@@ -363,7 +372,7 @@ export function TotalData() {
                 </table>
               </div>
               <div className="px-4 py-3 space-y-3" style={{ borderTop: `1px solid ${C.border}` }}>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span style={{ color: C.textMuted, fontSize: 12 }}>Total Over Limit</span>
                   <span style={{ color: C.textDim, fontSize: 11 }}>Count: {overLimitRows.length}</span>
                   <span style={{ color: C.orangeText, fontSize: 13, fontWeight: 700 }}>{overLimitTotal.toLocaleString()}</span>
