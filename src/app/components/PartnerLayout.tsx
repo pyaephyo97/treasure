@@ -247,21 +247,34 @@ export function PartnerLayout() {
     } catch { toast.error('Copy failed'); }
   };
 
-  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 13 };
+  // 16px minimum on every form control — anything smaller makes iOS Safari
+  // auto-zoom the whole page when the field is focused, which feels broken
+  // on a phone. This is otherwise identical to the old 13px style.
+  const inp = { padding: '8px 12px', borderRadius: 8, outline: 'none', background: C.card2, border: `1px solid ${C.border}`, color: C.text, fontSize: 16 };
+
+  // Extra top padding on notched/Dynamic-Island phones once installed as a
+  // standalone PWA (index.html's viewport-fit=cover lets content draw under
+  // the notch) — env() resolves to 0 in a normal browser tab, so this is a
+  // no-op there and only matters for the installed app.
+  const HEADER_H = 52;
+  const headerSafeTop = 'env(safe-area-inset-top, 0px)';
 
   return (
     <div className="min-h-screen w-full" style={{ background: C.bg, color: C.text }}>
       {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-3 sticky top-0 z-20"
-        style={{ background: C.card, borderBottom: `1px solid ${C.border}` }}>
+      <header className="flex items-center gap-3 px-4 sticky top-0 z-20"
+        style={{
+          background: C.card, borderBottom: `1px solid ${C.border}`,
+          paddingTop: `calc(12px + ${headerSafeTop})`, paddingBottom: 12,
+        }}>
         <div className="flex items-center gap-2 flex-shrink-0">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.goldGrad }}>
             <span style={{ fontSize: 12 }}>♦</span>
           </div>
           <span style={{ color: C.gold, fontSize: 13, fontWeight: 800, letterSpacing: '0.08em' }}>TREASURE</span>
         </div>
-        <div className="flex-1 flex items-center justify-center gap-2 flex-wrap">
-          <div className="w-2 h-2 rounded-full" style={{ background: isOpen ? C.green : C.red }} />
+        <div className="flex-1 flex items-center justify-center gap-2 flex-wrap min-w-0">
+          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: isOpen ? C.green : C.red }} />
           <span style={{ fontSize: 12, fontWeight: 700, color: isOpen ? C.greenText : C.redText }}>
             SESSION {session.status.toUpperCase()}
           </span>
@@ -280,15 +293,22 @@ export function PartnerLayout() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p style={{ color: C.text, fontSize: 12, fontWeight: 700 }}>{partner?.username}</p>
-            <p style={{ color: C.textDim, fontSize: 10 }}>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {/* min-w-0 + truncate: a long username must never force the header
+              into horizontal overflow on a narrow phone — it ellipsizes
+              instead. The stats line is hidden below the `sm` breakpoint
+              (i.e. on real phones) to keep the header from feeling cramped;
+              it's still visible on the Report tab below. */}
+          <div className="text-right min-w-0" style={{ maxWidth: 160 }}>
+            <p style={{ color: C.text, fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {partner?.username}
+            </p>
+            <p className="hidden sm:block" style={{ color: C.textDim, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               Partner · {partner?.commissionRate}% comm · {partner?.sharePercentage}% share
             </p>
           </div>
           <button onClick={() => logout()}
-            style={{ background: 'none', border: 'none', color: C.textDim, cursor: 'pointer', padding: 4 }}>
+            style={{ background: 'none', border: 'none', color: C.textDim, cursor: 'pointer', padding: 4, flexShrink: 0 }}>
             <LogOut size={16} />
           </button>
         </div>
@@ -307,8 +327,10 @@ export function PartnerLayout() {
         </div>
       ))}
 
-      {/* Tabs */}
-      <div className="flex gap-1 p-3 sticky z-10" style={{ background: C.bg, top: 52, borderBottom: `1px solid ${C.border}` }}>
+      {/* Tabs — sticks directly below the header; offset accounts for the
+          same safe-area inset added to the header above so the two stay
+          flush against each other on notched phones too. */}
+      <div className="flex gap-1 p-3 sticky z-10" style={{ background: C.bg, top: `calc(${HEADER_H}px + ${headerSafeTop})`, borderBottom: `1px solid ${C.border}` }}>
         {[{ id: 'data' as Tab, label: 'Data View' }, { id: 'report' as Tab, label: 'Report' }].map(({ id, label }) => (
           <button key={id} onClick={() => setTab(id)}
             className="flex-1 py-2 rounded-xl"
@@ -321,8 +343,9 @@ export function PartnerLayout() {
         ))}
       </div>
 
-      {/* Content */}
-      <div className="max-w-4xl mx-auto px-4 py-5">
+      {/* Content — bottom safe-area padding keeps the last card clear of the
+          home-indicator gesture bar when installed as a standalone PWA. */}
+      <div className="max-w-4xl mx-auto px-4 py-5" style={{ paddingBottom: 'max(20px, env(safe-area-inset-bottom, 0px))' }}>
         {/* DATA VIEW */}
         {tab === 'data' && (
           <div className="space-y-4">
