@@ -8,7 +8,74 @@ import { formatIndexValueLines, formatPayoutDetail } from '../utils/format';
 import { useCountdownMs, formatCountdown } from '../utils/countdown';
 
 type Tab = 'entry' | 'history' | 'invoice';
-type EntryMode = 'bulk' | 'single';
+type EntryMode = 'bulk' | 'keyboard' | 'single';
+
+// Keyboard Entry's pattern tabs, in the same order/positions as the
+// reference recording. Only Head/Tail/Break are wired to real generation
+// logic — their outputs were verified frame-by-frame against the
+// recording (e.g. Break "5" -> 05,14,23,32,41,50,69,78,87,96, all pairs
+// summing to 5 mod 10). Power/Ko/Twin-Ko/Twin appear in the recording too
+// but their exact generation rule couldn't be confirmed from the video
+// alone (Power in particular looks like a curated/external "hot numbers"
+// list, not something derivable from the recording) — they're shown
+// disabled in the same layout slot rather than guessed at, since this is
+// a money-handling feature.
+type KbTabId = 'power' | 'twin' | 'ko' | 'head' | 'tail' | 'break' | 'nyiko';
+type KbMode = KbTabId | 'reverse' | null;
+const KB_TABS: { id: KbTabId; label: string; live: boolean }[] = [
+  { id: 'power', label: 'Power', live: false },
+  { id: 'twin', label: 'Twin', live: false },
+  { id: 'ko', label: 'Ko', live: false },
+  { id: 'head', label: 'Head', live: true },
+  { id: 'tail', label: 'Tail', live: true },
+  { id: 'break', label: 'Break', live: true },
+  { id: 'nyiko', label: 'Twin-Ko', live: false },
+];
+
+/** Generates the entries a Keyboard Entry ENTER/OK press should add, given
+ * the active mode, the typed number, and the amount. Mirrors the exact
+ * rules verified against the reference recording:
+ *  - 'reverse' (R key): a 2-digit number + its digit-reversed counterpart,
+ *    both at `amount` (or one entry at double amount for a palindrome like
+ *    55) — same convention as the "46R1000" bulk-entry format.
+ *  - 'head': single digit D -> the 10 numbers D0..D9.
+ *  - 'tail': single digit D -> the 10 numbers 0D..9D.
+ *  - 'break': single digit D -> the 10 numbers whose digits sum to D mod 10.
+ *  - default (straight): one or more "/"-separated 1-2 digit numbers, all
+ *    at the same amount (e.g. "12/34/56" -> three entries).
+ */
+function computeKbEntries(
+  mode: KbMode, rawNumber: string, amount: number
+): { number: string; amount: number }[] | { error: string } {
+  const trimmed = rawNumber.trim();
+  if (mode === 'reverse') {
+    if (!/^\d{1,2}$/.test(trimmed)) return { error: 'Type a 2-digit number first' };
+    const num = trimmed.padStart(2, '0');
+    const rev = num[1] + num[0];
+    if (num === rev) return [{ number: num, amount: amount * 2 }];
+    return [{ number: num, amount }, { number: rev, amount }];
+  }
+  if (mode === 'head' || mode === 'tail' || mode === 'break') {
+    if (!/^\d$/.test(trimmed)) return { error: 'Enter a single digit (0–9)' };
+    const d = parseInt(trimmed, 10);
+    const out: { number: string; amount: number }[] = [];
+    for (let i = 0; i < 10; i++) {
+      const number = mode === 'head' ? `${d}${i}` : mode === 'tail' ? `${i}${d}` : `${i}${(((d - i) % 10) + 10) % 10}`;
+      out.push({ number, amount });
+    }
+    return out;
+  }
+  // Straight (default, no tab selected) — supports "/"-separated numbers
+  // all at the same amount, matching the recording's "/" key.
+  const tokens = trimmed.split('/').map(t => t.trim()).filter(Boolean);
+  if (tokens.length === 0) return { error: 'Enter a number' };
+  const out: { number: string; amount: number }[] = [];
+  for (const t of tokens) {
+    if (!/^\d{1,2}$/.test(t) || parseInt(t, 10) > 99) return { error: `Invalid number "${t}"` };
+    out.push({ number: t.padStart(2, '0'), amount });
+  }
+  return out;
+}
 
 const TABS: { id: Tab; label: string; icon: any }[] = [
   { id: 'entry', label: 'Data Entry', icon: ClipboardList },
@@ -63,6 +130,15 @@ export function UserLayout() {
   const [bulkText, setBulkText] = useState('');
   const [parsed, setParsed] = useState<ParsedLine[] | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+
+  // --- Keyboard Entry ---
+  const [kbNumber, setKbNumber] = useState('');
+  const [kbAmount, setKbAmount] = useState('');
+  const [kbActiveField, setKbActiveField] = useState<'number' | 'amount'>('number');
+  const [kbMode, setKbMode] = useState<KbMode>(null);
+  const [kbPending, setKbPending] = useState<{ number: string; amount: number }[]>([]);
+  const [kbShowConfirm, setKbShowConfirm] = useState(false);
+
   const [singleNum, setSingleNum] = useState('');
   const [singleAmt, setSingleAmt] = useState('');
   const [dismissedWarnings, setDismissedWarnings] = useState<string[]>([]);
@@ -238,6 +314,92 @@ export function UserLayout() {
 
     setBulkText(remaining.map(p => p.raw).join('\n'));
     setParsed(remaining.length ? remaining : null);
+  };
+
+  // --- Keyboard Entry — numeric keypad + pattern tabs, matching the
+  // reference recording's layout and (for the verified tabs) behavior. ---
+
+  const kbAppend = (s: string) => {
+    if (kbActiveField === 'number') setKbNumber(prev => prev + s);
+    else setKbAmount(prev => prev + s);
+  };
+
+  const kbClearField = () => {
+    if (kbActiveField === 'number') setKbNumber('');
+    else setKbAmount('');
+  };
+
+  const kbPressR = () => {
+    if (!/^\d{1,2}$/.test(kbNumber.trim())) { toast.error('Type a 2-digit number first'); return; }
+    setKbMode('reverse');
+  };
+
+  const kbSelectTab = (t: typeof KB_TABS[number]) => {
+    if (!t.live) { toast('Coming soon — this pattern wasn’t confirmed from the recording yet.'); return; }
+    setKbMode(t.id);
+    setKbNumber('');
+    setKbActiveField('number');
+  };
+
+  const kbStubButton = () => toast('Coming soon — this button wasn’t confirmed from the recording yet.');
+
+  // ENTER — commits the current number+mode+amount into the pending list.
+  // Amount is deliberately left as-is (sticky) afterward, matching the
+  // recording: after every ENTER, only the number field and mode reset.
+  const kbEnter = () => {
+    const amt = parseInt(kbAmount || '', 10);
+    if (!kbAmount || isNaN(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+    const result = computeKbEntries(kbMode, kbNumber, amt);
+    if ('error' in result) { toast.error(result.error); return; }
+    setKbPending(prev => [...prev, ...result]);
+    setKbNumber('');
+    setKbMode(null);
+    setKbActiveField('number');
+  };
+
+  // OK — commits whatever's currently sitting in the boxes (same as ENTER)
+  // if any, then opens the confirm dialog for everything gathered so far.
+  const kbOpenConfirm = () => {
+    let nextPending = kbPending;
+    if (kbNumber.trim()) {
+      const amt = parseInt(kbAmount || '', 10);
+      if (!kbAmount || isNaN(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+      const result = computeKbEntries(kbMode, kbNumber, amt);
+      if ('error' in result) { toast.error(result.error); return; }
+      nextPending = [...kbPending, ...result];
+      setKbPending(nextPending);
+      setKbNumber('');
+      setKbMode(null);
+    }
+    if (nextPending.length === 0) { toast.error('No entries to submit'); return; }
+    setKbShowConfirm(true);
+  };
+
+  const kbClearAll = () => {
+    setKbPending([]);
+    setKbNumber('');
+    setKbAmount('');
+    setKbMode(null);
+    setKbActiveField('number');
+  };
+
+  const kbSubmit = async () => {
+    if (kbPending.length === 0) { setKbShowConfirm(false); return; }
+    const flat = kbPending.map(p => ({ number: p.number, amount: p.amount }));
+    const res = await submitBetEntries(flat);
+    setKbShowConfirm(false);
+    if (res.error) { toast.error(res.error); return; }
+    if (res.insertedCount > 0) {
+      toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
+    }
+    // Anything the server rejected stays in the pending list to fix and
+    // resubmit — same recovery behavior as Bulk Entry.
+    const failed: { number: string; amount: number }[] = [];
+    res.results.forEach((r, i) => { if (r.status === 'error') failed.push(kbPending[i]); });
+    if (failed.length > 0) {
+      toast.error(`${failed.length} entr${failed.length !== 1 ? 'ies' : 'y'} rejected — left in the list to fix`);
+    }
+    setKbPending(failed);
   };
 
   const submitSingle = async () => {
@@ -429,8 +591,8 @@ export function UserLayout() {
             {canEnter && (
               <>
                 {/* Mode toggle */}
-                <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: C.card }}>
-                  {(['bulk', 'single'] as EntryMode[]).map(m => (
+                <div className="flex gap-1 p-1 rounded-xl w-fit flex-wrap" style={{ background: C.card }}>
+                  {(['bulk', 'keyboard', 'single'] as EntryMode[]).map(m => (
                     <button key={m} onClick={() => setMode(m)}
                       className="px-5 py-2 rounded-lg capitalize"
                       style={{
@@ -439,7 +601,7 @@ export function UserLayout() {
                         border: `1px solid ${mode === m ? C.border : 'transparent'}`,
                         fontSize: 12, fontWeight: mode === m ? 600 : 400, cursor: 'pointer',
                       }}>
-                      {m === 'bulk' ? 'Bulk Entry' : 'Single Entry'}
+                      {m === 'bulk' ? 'Bulk Entry' : m === 'keyboard' ? 'Keyboard Entry' : 'Single Entry'}
                     </button>
                   ))}
                 </div>
@@ -590,6 +752,158 @@ export function UserLayout() {
                               Cancel
                             </button>
                             <button onClick={submitBulk} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                              Confirm Submit
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : mode === 'keyboard' ? (
+                  <div className="rounded-xl p-5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                    <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 10 }}>KEYBOARD ENTRY</p>
+
+                    {/* Pending entries — nothing reaches the server until OK -> Confirm */}
+                    <div className="rounded-lg overflow-hidden mb-3" style={{ border: `1px solid ${C.borderSubtle}` }}>
+                      <div className="grid grid-cols-3" style={{ background: C.card2 }}>
+                        <span style={{ padding: '7px 10px', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: C.textDim }}>NO</span>
+                        <span style={{ padding: '7px 10px', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: C.textDim }}>NUMBER</span>
+                        <span style={{ padding: '7px 10px', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: C.textDim, textAlign: 'right' }}>AMOUNT</span>
+                      </div>
+                      {kbPending.length === 0 ? (
+                        <p style={{ color: C.textDim, fontSize: 12, padding: '18px 10px', textAlign: 'center' }}>
+                          No entries yet — type a number, pick a mode if needed, set an amount, then ENTER.
+                        </p>
+                      ) : (
+                        <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                          {kbPending.map((p, i) => (
+                            <div key={i} className="grid grid-cols-3 items-center" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                              <span style={{ padding: '7px 10px', fontSize: 12, color: C.textDim }}>{i + 1}</span>
+                              <span style={{ padding: '7px 10px', fontSize: 13, fontWeight: 700, color: C.gold }}>{p.number}</span>
+                              <div className="flex items-center justify-end gap-2" style={{ padding: '7px 10px' }}>
+                                <span style={{ fontSize: 13, color: C.text }}>{p.amount.toLocaleString()}</span>
+                                <button onClick={() => setKbPending(prev => prev.filter((_, j) => j !== i))}
+                                  style={{ background: 'none', border: 'none', color: C.redText, cursor: 'pointer', padding: 2 }}>
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Total */}
+                    <div className="flex items-center justify-between px-1 mb-3">
+                      <span style={{ color: C.textMuted, fontSize: 12, fontWeight: 600 }}>
+                        Total = {kbPending.reduce((s, p) => s + p.amount, 0).toLocaleString()}
+                      </span>
+                      <span style={{ color: C.textDim, fontSize: 11 }}>{kbPending.length} entr{kbPending.length !== 1 ? 'ies' : 'y'}</span>
+                    </div>
+
+                    {/* Number / Mode / Amount — tap Number or Amount to type into it */}
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <button onClick={() => setKbActiveField('number')}
+                        style={{
+                          ...inp, minWidth: 0, textAlign: 'center', fontWeight: 700, cursor: 'pointer',
+                          background: kbActiveField === 'number' ? C.card2 : C.card3,
+                          border: `1px solid ${kbActiveField === 'number' ? C.gold : C.border}`,
+                        }}>
+                        {kbNumber || <span style={{ color: C.textDim, fontWeight: 400 }}>Number</span>}
+                      </button>
+                      <div style={{ ...inp, minWidth: 0, textAlign: 'center', color: C.textDim, fontWeight: 600, background: C.card3 }}>
+                        {kbMode === 'reverse' ? 'R' : KB_TABS.find(t => t.id === kbMode)?.label ?? 'Straight'}
+                      </div>
+                      <button onClick={() => setKbActiveField('amount')}
+                        style={{
+                          ...inp, minWidth: 0, textAlign: 'center', fontWeight: 700, cursor: 'pointer',
+                          background: kbActiveField === 'amount' ? C.card2 : C.card3,
+                          border: `1px solid ${kbActiveField === 'amount' ? C.gold : C.border}`,
+                        }}>
+                        {kbAmount || <span style={{ color: C.textDim, fontWeight: 400 }}>Amount</span>}
+                      </button>
+                    </div>
+
+                    {/* Pattern tabs — Head/Tail/Break are live; Power/Twin/Ko/Twin-Ko are shown
+                        in the same layout position (matching the recording) but disabled, since
+                        their exact generation rule couldn't be confirmed from the recording. */}
+                    <div className="grid grid-cols-4 gap-1.5 mb-3">
+                      {KB_TABS.map(t => (
+                        <button key={t.id} onClick={() => kbSelectTab(t)}
+                          style={{
+                            padding: '8px 2px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            background: kbMode === t.id ? C.goldDim : C.card2,
+                            color: kbMode === t.id ? C.gold : t.live ? C.textMuted : C.textDim,
+                            border: `1px solid ${kbMode === t.id ? C.borderBright : C.borderSubtle}`,
+                            opacity: t.live ? 1 : 0.55,
+                          }}>
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Keypad — same 4x5 layout as the recording: a special/quick button in
+                        the left column of each digit row, digits in the middle, a function
+                        key on the right. */}
+                    <div className="grid grid-cols-5 gap-1.5">
+                      <button onClick={kbStubButton} style={{ padding: '13px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: C.card3, color: C.textDim, border: `1px solid ${C.borderSubtle}` }}>Nekkhat</button>
+                      {(['7', '8', '9'] as const).map(d => (
+                        <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
+                      ))}
+                      <button onClick={kbPressR} style={{ padding: '13px 0', borderRadius: 8, fontSize: 14, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>R</button>
+
+                      <button onClick={kbStubButton} style={{ padding: '13px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: C.card3, color: C.textDim, border: `1px solid ${C.borderSubtle}` }}>Kwe</button>
+                      {(['4', '5', '6'] as const).map(d => (
+                        <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
+                      ))}
+                      <button onClick={() => kbAppend('/')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>/</button>
+
+                      <button onClick={kbStubButton} style={{ padding: '13px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: C.card3, color: C.textDim, border: `1px solid ${C.borderSubtle}` }}>Apar</button>
+                      {(['1', '2', '3'] as const).map(d => (
+                        <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
+                      ))}
+                      <button onClick={kbEnter} style={{ padding: '13px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>ENTER</button>
+
+                      <button onClick={kbClearField} style={{ padding: '13px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.redBg, color: C.redText, border: `1px solid ${C.red}44` }}>Clear</button>
+                      <button onClick={() => kbAppend('0')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>0</button>
+                      <button onClick={() => kbAppend('00')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>00</button>
+                      <button onClick={() => kbAppend('000')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>000</button>
+                      <button onClick={kbOpenConfirm} style={{ padding: '13px 0', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer', background: C.goldGrad, color: '#000', border: 'none' }}>OK</button>
+                    </div>
+
+                    {/* Bottom action bar — Cancel wipes the whole pending list, Submit
+                        opens the same confirm dialog as OK. */}
+                    <div className="flex gap-3 mt-3">
+                      <button onClick={kbClearAll}
+                        className="flex-1 py-2.5 rounded-xl"
+                        style={{ background: C.redBg, color: C.redText, border: `1px solid ${C.red}44`, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                        Cancel
+                      </button>
+                      <button onClick={kbOpenConfirm}
+                        className="flex-1 py-2.5 rounded-xl"
+                        style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
+                        Submit
+                      </button>
+                    </div>
+
+                    {/* Confirm modal */}
+                    {kbShowConfirm && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+                        <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                          <h2 style={{ color: C.text, fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
+                            Confirm Entries
+                          </h2>
+                          <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 20 }}>
+                            Submit <strong>{kbPending.length}</strong> entr{kbPending.length !== 1 ? 'ies' : 'y'} totaling{' '}
+                            <strong>{kbPending.reduce((s, p) => s + p.amount, 0).toLocaleString()}</strong>? This can't be undone.
+                          </p>
+                          <div className="flex gap-3">
+                            <button onClick={() => setKbShowConfirm(false)} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 13 }}>
+                              Cancel
+                            </button>
+                            <button onClick={kbSubmit} className="flex-1 py-2.5 rounded-lg"
                               style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
                               Confirm Submit
                             </button>
