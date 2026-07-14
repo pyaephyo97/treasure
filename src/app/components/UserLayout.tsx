@@ -10,37 +10,46 @@ import { useCountdownMs, formatCountdown } from '../utils/countdown';
 type Tab = 'entry' | 'history' | 'invoice';
 type EntryMode = 'bulk' | 'keyboard' | 'single';
 
-// Keyboard Entry's pattern tabs, in the same order/positions as the
-// reference recording. Only Head/Tail/Break are wired to real generation
-// logic — their outputs were verified frame-by-frame against the
-// recording (e.g. Break "5" -> 05,14,23,32,41,50,69,78,87,96, all pairs
-// summing to 5 mod 10). Power/Ko/Twin-Ko/Twin appear in the recording too
-// but their exact generation rule couldn't be confirmed from the video
-// alone (Power in particular looks like a curated/external "hot numbers"
-// list, not something derivable from the recording) — they're shown
-// disabled in the same layout slot rather than guessed at, since this is
-// a money-handling feature.
-type KbTabId = 'power' | 'twin' | 'ko' | 'head' | 'tail' | 'break' | 'nyiko';
+// Keyboard Entry's 8 pattern tabs. Labels are the exact Burmese terms the
+// user specified — no English translations. All 8 rules were confirmed
+// directly by the user (အပါ/ပါ၀ါ/နက္ခတ်/ခွေ/အပူး) or verified frame-by-frame
+// against the reference recording (ထိပ်/နောက်/ဘရိတ်), and are fully live.
+type KbTabId = 'apar' | 'head' | 'tail' | 'power' | 'break' | 'nekkhat' | 'kwe' | 'twin';
 type KbMode = KbTabId | 'reverse' | null;
-const KB_TABS: { id: KbTabId; label: string; live: boolean }[] = [
-  { id: 'power', label: 'Power', live: false },
-  { id: 'twin', label: 'Twin', live: false },
-  { id: 'ko', label: 'Ko', live: false },
-  { id: 'head', label: 'Head', live: true },
-  { id: 'tail', label: 'Tail', live: true },
-  { id: 'break', label: 'Break', live: true },
-  { id: 'nyiko', label: 'Twin-Ko', live: false },
+const KB_TABS: { id: KbTabId; label: string }[] = [
+  { id: 'apar', label: 'အပါ' },
+  { id: 'head', label: 'ထိပ်' },
+  { id: 'tail', label: 'နောက်' },
+  { id: 'power', label: 'ပါ၀ါ' },
+  { id: 'break', label: 'ဘရိတ်' },
+  { id: 'nekkhat', label: 'နက္ခတ်' },
+  { id: 'kwe', label: 'ခွေ' },
+  { id: 'twin', label: 'အပူး' },
 ];
+
+// ပါ၀ါ, နက္ခတ်, and အပူး are fixed 10-number lists — no digit input needed,
+// just an amount. Confirmed exactly by the user.
+const KB_FIXED_LIST_MODES: KbTabId[] = ['power', 'nekkhat', 'twin'];
+const POWER_NUMBERS = ['05', '16', '27', '38', '49', '50', '61', '72', '83', '94'];
+const NEKKHAT_NUMBERS = ['07', '18', '24', '35', '42', '53', '69', '70', '81', '96'];
+const TWIN_NUMBERS = ['00', '11', '22', '33', '44', '55', '66', '77', '88', '99'];
 
 /** Generates the entries a Keyboard Entry ENTER/OK press should add, given
  * the active mode, the typed number, and the amount. Mirrors the exact
- * rules verified against the reference recording:
+ * rules confirmed by the user:
  *  - 'reverse' (R key): a 2-digit number + its digit-reversed counterpart,
  *    both at `amount` (or one entry at double amount for a palindrome like
  *    55) — same convention as the "46R1000" bulk-entry format.
- *  - 'head': single digit D -> the 10 numbers D0..D9.
- *  - 'tail': single digit D -> the 10 numbers 0D..9D.
- *  - 'break': single digit D -> the 10 numbers whose digits sum to D mod 10.
+ *  - 'head' (ထိပ်): single digit D -> the 10 numbers D0..D9.
+ *  - 'tail' (နောက်): single digit D -> the 10 numbers 0D..9D.
+ *  - 'break' (ဘရိတ်): single digit D -> the 10 numbers whose digits sum to D mod 10.
+ *  - 'apar' (အပါ): single digit D -> all numbers where D is the tens digit
+ *    OR the units digit (union, deduped — 19 numbers for any digit).
+ *  - 'power' (ပါ၀ါ), 'nekkhat' (နက္ခတ်), 'twin' (အပူး): fixed 10-number
+ *    lists, no digit input required.
+ *  - 'kwe' (ခွေ): multi-digit seed (3+ digits) -> every ordered pair of
+ *    distinct digit positions, walked in original input order, as a
+ *    2-digit number (e.g. "123" -> 12,13,21,23,31,32).
  *  - default (straight): one or more "/"-separated 1-2 digit numbers, all
  *    at the same amount (e.g. "12/34/56" -> three entries).
  */
@@ -48,6 +57,11 @@ function computeKbEntries(
   mode: KbMode, rawNumber: string, amount: number
 ): { number: string; amount: number }[] | { error: string } {
   const trimmed = rawNumber.trim();
+
+  if (mode === 'power') return POWER_NUMBERS.map(number => ({ number, amount }));
+  if (mode === 'nekkhat') return NEKKHAT_NUMBERS.map(number => ({ number, amount }));
+  if (mode === 'twin') return TWIN_NUMBERS.map(number => ({ number, amount }));
+
   if (mode === 'reverse') {
     if (!/^\d{1,2}$/.test(trimmed)) return { error: 'Type a 2-digit number first' };
     const num = trimmed.padStart(2, '0');
@@ -62,6 +76,28 @@ function computeKbEntries(
     for (let i = 0; i < 10; i++) {
       const number = mode === 'head' ? `${d}${i}` : mode === 'tail' ? `${i}${d}` : `${i}${(((d - i) % 10) + 10) % 10}`;
       out.push({ number, amount });
+    }
+    return out;
+  }
+  if (mode === 'apar') {
+    if (!/^\d$/.test(trimmed)) return { error: 'Enter a single digit (0–9)' };
+    const out: { number: string; amount: number }[] = [];
+    for (let i = 0; i < 10; i++) out.push({ number: `${trimmed}${i}`, amount }); // tens digit = D
+    for (let i = 0; i < 10; i++) if (String(i) !== trimmed) out.push({ number: `${i}${trimmed}`, amount }); // units digit = D
+    out.sort((a, b) => a.number.localeCompare(b.number));
+    return out;
+  }
+  if (mode === 'kwe') {
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length < 2) return { error: 'Type at least 2 digits' };
+    const out: { number: string; amount: number }[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < digits.length; i++) {
+      for (let j = 0; j < digits.length; j++) {
+        if (i === j) continue;
+        const number = digits[i] + digits[j];
+        if (!seen.has(number)) { seen.add(number); out.push({ number, amount }); }
+      }
     }
     return out;
   }
@@ -335,13 +371,10 @@ export function UserLayout() {
   };
 
   const kbSelectTab = (t: typeof KB_TABS[number]) => {
-    if (!t.live) { toast('Coming soon — this pattern wasn’t confirmed from the recording yet.'); return; }
     setKbMode(t.id);
     setKbNumber('');
     setKbActiveField('number');
   };
-
-  const kbStubButton = () => toast('Coming soon — this button wasn’t confirmed from the recording yet.');
 
   // ENTER — commits the current number+mode+amount into the pending list.
   // Amount is deliberately left as-is (sticky) afterward, matching the
@@ -361,7 +394,10 @@ export function UserLayout() {
   // if any, then opens the confirm dialog for everything gathered so far.
   const kbOpenConfirm = () => {
     let nextPending = kbPending;
-    if (kbNumber.trim()) {
+    // Fixed-list modes (ပါ၀ါ/နက္ခတ်/အပူး) need no digit typed in — let a
+    // direct OK/Submit commit them even if the number box is empty.
+    const isFixedList = kbMode !== null && KB_FIXED_LIST_MODES.includes(kbMode as KbTabId);
+    if (kbNumber.trim() || isFixedList) {
       const amt = parseInt(kbAmount || '', 10);
       if (!kbAmount || isNaN(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
       const result = computeKbEntries(kbMode, kbNumber, amt);
@@ -813,7 +849,7 @@ export function UserLayout() {
                         {kbNumber || <span style={{ color: C.textDim, fontWeight: 400 }}>Number</span>}
                       </button>
                       <div style={{ ...inp, minWidth: 0, textAlign: 'center', color: C.textDim, fontWeight: 600, background: C.card3 }}>
-                        {kbMode === 'reverse' ? 'R' : KB_TABS.find(t => t.id === kbMode)?.label ?? 'Straight'}
+                        {kbMode === 'reverse' ? 'R' : KB_TABS.find(t => t.id === kbMode)?.label ?? 'ဒဲ့'}
                       </div>
                       <button onClick={() => setKbActiveField('amount')}
                         style={{
@@ -825,41 +861,36 @@ export function UserLayout() {
                       </button>
                     </div>
 
-                    {/* Pattern tabs — Head/Tail/Break are live; Power/Twin/Ko/Twin-Ko are shown
-                        in the same layout position (matching the recording) but disabled, since
-                        their exact generation rule couldn't be confirmed from the recording. */}
+                    {/* Pattern tabs — all 8 are live, exact Burmese labels + rules
+                        confirmed directly by the user. */}
                     <div className="grid grid-cols-4 gap-1.5 mb-3">
                       {KB_TABS.map(t => (
                         <button key={t.id} onClick={() => kbSelectTab(t)}
                           style={{
-                            padding: '8px 2px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            padding: '8px 2px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
                             background: kbMode === t.id ? C.goldDim : C.card2,
-                            color: kbMode === t.id ? C.gold : t.live ? C.textMuted : C.textDim,
+                            color: kbMode === t.id ? C.gold : C.textMuted,
                             border: `1px solid ${kbMode === t.id ? C.borderBright : C.borderSubtle}`,
-                            opacity: t.live ? 1 : 0.55,
                           }}>
                           {t.label}
                         </button>
                       ))}
                     </div>
 
-                    {/* Keypad — same 4x5 layout as the recording: a special/quick button in
-                        the left column of each digit row, digits in the middle, a function
-                        key on the right. */}
-                    <div className="grid grid-cols-5 gap-1.5">
-                      <button onClick={kbStubButton} style={{ padding: '13px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: C.card3, color: C.textDim, border: `1px solid ${C.borderSubtle}` }}>Nekkhat</button>
+                    {/* Keypad — digits + function keys (R, /, ENTER, Clear). Nekkhat/
+                        Kwe/Apar moved into the tab row above now that all 8 patterns
+                        are live, so this is a plain 4x4 grid. */}
+                    <div className="grid grid-cols-4 gap-1.5">
                       {(['7', '8', '9'] as const).map(d => (
                         <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
                       ))}
                       <button onClick={kbPressR} style={{ padding: '13px 0', borderRadius: 8, fontSize: 14, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>R</button>
 
-                      <button onClick={kbStubButton} style={{ padding: '13px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: C.card3, color: C.textDim, border: `1px solid ${C.borderSubtle}` }}>Kwe</button>
                       {(['4', '5', '6'] as const).map(d => (
                         <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
                       ))}
                       <button onClick={() => kbAppend('/')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>/</button>
 
-                      <button onClick={kbStubButton} style={{ padding: '13px 0', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', background: C.card3, color: C.textDim, border: `1px solid ${C.borderSubtle}` }}>Apar</button>
                       {(['1', '2', '3'] as const).map(d => (
                         <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
                       ))}
@@ -869,11 +900,10 @@ export function UserLayout() {
                       <button onClick={() => kbAppend('0')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>0</button>
                       <button onClick={() => kbAppend('00')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>00</button>
                       <button onClick={() => kbAppend('000')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>000</button>
-                      <button onClick={kbOpenConfirm} style={{ padding: '13px 0', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer', background: C.goldGrad, color: '#000', border: 'none' }}>OK</button>
                     </div>
 
                     {/* Bottom action bar — Cancel wipes the whole pending list, Submit
-                        opens the same confirm dialog as OK. */}
+                        (same as OK in the recording) opens the confirm dialog. */}
                     <div className="flex gap-3 mt-3">
                       <button onClick={kbClearAll}
                         className="flex-1 py-2.5 rounded-xl"
