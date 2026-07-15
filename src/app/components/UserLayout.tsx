@@ -356,8 +356,17 @@ export function UserLayout() {
   // reference recording's layout and (for the verified tabs) behavior. ---
 
   const kbAppend = (s: string) => {
-    if (kbActiveField === 'number') setKbNumber(prev => prev + s);
-    else setKbAmount(prev => prev + s);
+    if (kbActiveField === 'number') {
+      // Number is capped at 2 digits for every mode except ခွေ, which needs
+      // a 3+ digit seed to generate its position-pair permutations.
+      if (kbMode !== 'kwe') {
+        setKbNumber(prev => (prev.length + s.length > 2 ? prev : prev + s));
+      } else {
+        setKbNumber(prev => prev + s);
+      }
+    } else {
+      setKbAmount(prev => prev + s);
+    }
   };
 
   const kbClearField = () => {
@@ -378,7 +387,9 @@ export function UserLayout() {
   const kbSelectTab = (t: typeof KB_TABS[number]) => {
     setKbMode(t.id);
     setKbNumber('');
-    setKbActiveField('number');
+    // Fixed-list modes (ပါဝါ/နက္ခတ်/အပူး) need no number at all — jump
+    // straight to Amount instead of a Number box that's about to be disabled.
+    setKbActiveField(KB_FIXED_LIST_MODES.includes(t.id) ? 'amount' : 'number');
   };
 
   // ENTER — commits the current number+mode+amount into the pending list.
@@ -423,6 +434,10 @@ export function UserLayout() {
     setKbMode(null);
     setKbActiveField('number');
   };
+
+  // ပါဝါ/နက္ခတ်/အပူး are fixed-list modes — no number needed, so the Number
+  // box is disabled while one of them is selected.
+  const kbNumberDisabled = kbMode !== null && KB_FIXED_LIST_MODES.includes(kbMode as KbTabId);
 
   const kbSubmit = async () => {
     if (kbPending.length === 0) { setKbShowConfirm(false); return; }
@@ -817,7 +832,7 @@ export function UserLayout() {
                           No entries yet — type a number, pick a mode if needed, set an amount, then ENTER.
                         </p>
                       ) : (
-                        <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                        <div style={{ maxHeight: '36vh', overflowY: 'auto' }}>
                           {kbPending.map((p, i) => (
                             <div key={i} className="grid grid-cols-3 items-center" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                               <span style={{ padding: '7px 10px', fontSize: 12, color: C.textDim }}>{i + 1}</span>
@@ -843,15 +858,22 @@ export function UserLayout() {
                       <span style={{ color: C.textDim, fontSize: 11 }}>{kbPending.length} entr{kbPending.length !== 1 ? 'ies' : 'y'}</span>
                     </div>
 
-                    {/* Number / Mode / Amount — tap Number or Amount to type into it */}
+                    {/* Number / Mode / Amount — tap Number or Amount to type into it.
+                        Number is disabled for fixed-list modes (ပါဝါ/နက္ခတ်/အပူး),
+                        which need only an amount. */}
                     <div className="grid grid-cols-3 gap-2 mb-2">
-                      <button onClick={() => setKbActiveField('number')}
+                      <button onClick={() => !kbNumberDisabled && setKbActiveField('number')}
+                        disabled={kbNumberDisabled}
                         style={{
-                          ...inp, minWidth: 0, textAlign: 'center', fontWeight: 700, cursor: 'pointer',
-                          background: kbActiveField === 'number' ? C.card2 : C.card3,
-                          border: `1px solid ${kbActiveField === 'number' ? C.gold : C.border}`,
+                          ...inp, minWidth: 0, textAlign: 'center', fontWeight: 700,
+                          cursor: kbNumberDisabled ? 'not-allowed' : 'pointer',
+                          background: kbNumberDisabled ? C.card3 : kbActiveField === 'number' ? C.card2 : C.card3,
+                          border: `1px solid ${kbNumberDisabled ? C.borderSubtle : kbActiveField === 'number' ? C.gold : C.border}`,
+                          opacity: kbNumberDisabled ? 0.45 : 1,
                         }}>
-                        {kbNumber || <span style={{ color: C.textDim, fontWeight: 400 }}>Number</span>}
+                        {kbNumberDisabled
+                          ? <span style={{ color: C.textDim, fontWeight: 400 }}>N/A</span>
+                          : kbNumber || <span style={{ color: C.textDim, fontWeight: 400 }}>Number</span>}
                       </button>
                       <div style={{ ...inp, minWidth: 0, textAlign: 'center', color: C.textDim, fontWeight: 600, background: C.card3 }}>
                         {kbMode === 'reverse' ? 'R' : KB_TABS.find(t => t.id === kbMode)?.label ?? 'ဒဲ့'}
@@ -884,10 +906,11 @@ export function UserLayout() {
 
                     {/* Keypad — digits + function keys (R, Tab, ENTER, Clear). Nekkhat/
                         Kwe/Apar moved into the tab row above now that all 8 patterns
-                        are live, so this is a plain 4x4 grid. Sticky to the bottom of
-                        the viewport on mobile so it stays reachable while the pending
-                        list above is scrolled; slightly shorter keys than before to
-                        leave more room for the rest of the screen. */}
+                        are live, so this is a plain 4x4 grid. ENTER spans both bottom
+                        rows (a taller primary key, matches a real calculator's Enter).
+                        Sticky to the bottom of the viewport on mobile so it — and the
+                        Cancel/Submit bar right under it, bundled into the same dock —
+                        stay reachable while the pending list above is scrolled. */}
                     <div style={{
                       position: 'sticky', bottom: 0, zIndex: 6, background: C.card,
                       marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20,
@@ -908,28 +931,28 @@ export function UserLayout() {
                         {(['1', '2', '3'] as const).map(d => (
                           <button key={d} onClick={() => kbAppend(d)} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
                         ))}
-                        <button onClick={kbEnter} style={{ padding: '10px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.greenBg, color: C.greenText, border: `1px solid ${C.green}44` }}>ENTER</button>
+                        <button onClick={kbEnter} style={{ gridRow: 'span 2', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer', background: C.greenBg, color: C.greenText, border: `1px solid ${C.green}44` }}>ENTER</button>
 
                         <button onClick={kbClearField} style={{ padding: '10px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.redBg, color: C.redText, border: `1px solid ${C.red}44` }}>Clear</button>
                         <button onClick={() => kbAppend('0')} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>0</button>
                         <button onClick={() => kbAppend('00')} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>00</button>
-                        <div />
                       </div>
-                    </div>
 
-                    {/* Bottom action bar — Cancel wipes the whole pending list, Submit
-                        (same as OK in the recording) opens the confirm dialog. */}
-                    <div className="flex gap-3 mt-3">
-                      <button onClick={kbClearAll}
-                        className="flex-1 py-2.5 rounded-xl"
-                        style={{ background: C.redBg, color: C.redText, border: `1px solid ${C.red}44`, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-                        Cancel
-                      </button>
-                      <button onClick={kbOpenConfirm}
-                        className="flex-1 py-2.5 rounded-xl"
-                        style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
-                        Submit
-                      </button>
+                      {/* Bottom action bar — Cancel wipes the whole pending list, Submit
+                          (same as OK in the recording) opens the confirm dialog. Kept in
+                          the same sticky dock as the keypad, right below it, with no gap. */}
+                      <div className="flex gap-3 mt-1.5">
+                        <button onClick={kbClearAll}
+                          className="flex-1 py-2.5 rounded-xl"
+                          style={{ background: C.redBg, color: C.redText, border: `1px solid ${C.red}44`, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                          Cancel
+                        </button>
+                        <button onClick={kbOpenConfirm}
+                          className="flex-1 py-2.5 rounded-xl"
+                          style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 800 }}>
+                          Submit
+                        </button>
+                      </div>
                     </div>
 
                     {/* Confirm modal */}
