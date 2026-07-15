@@ -12,7 +12,7 @@ type EntryMode = 'bulk' | 'keyboard' | 'single';
 
 // Keyboard Entry's 8 pattern tabs. Labels are the exact Burmese terms the
 // user specified — no English translations. All 8 rules were confirmed
-// directly by the user (အပါ/ပါ၀ါ/နက္ခတ်/ခွေ/အပူး) or verified frame-by-frame
+// directly by the user (အပါ/ပါဝါ/နက္ခတ်/ခွေ/အပူး) or verified frame-by-frame
 // against the reference recording (ထိပ်/နောက်/ဘရိတ်), and are fully live.
 type KbTabId = 'apar' | 'head' | 'tail' | 'power' | 'break' | 'nekkhat' | 'kwe' | 'twin';
 type KbMode = KbTabId | 'reverse' | null;
@@ -20,14 +20,14 @@ const KB_TABS: { id: KbTabId; label: string }[] = [
   { id: 'apar', label: 'အပါ' },
   { id: 'head', label: 'ထိပ်' },
   { id: 'tail', label: 'နောက်' },
-  { id: 'power', label: 'ပါ၀ါ' },
+  { id: 'power', label: 'ပါဝါ' },
   { id: 'break', label: 'ဘရိတ်' },
   { id: 'nekkhat', label: 'နက္ခတ်' },
   { id: 'kwe', label: 'ခွေ' },
   { id: 'twin', label: 'အပူး' },
 ];
 
-// ပါ၀ါ, နက္ခတ်, and အပူး are fixed 10-number lists — no digit input needed,
+// ပါဝါ, နက္ခတ်, and အပူး are fixed 10-number lists — no digit input needed,
 // just an amount. Confirmed exactly by the user.
 const KB_FIXED_LIST_MODES: KbTabId[] = ['power', 'nekkhat', 'twin'];
 const POWER_NUMBERS = ['05', '16', '27', '38', '49', '50', '61', '72', '83', '94'];
@@ -45,7 +45,7 @@ const TWIN_NUMBERS = ['00', '11', '22', '33', '44', '55', '66', '77', '88', '99'
  *  - 'break' (ဘရိတ်): single digit D -> the 10 numbers whose digits sum to D mod 10.
  *  - 'apar' (အပါ): single digit D -> all numbers where D is the tens digit
  *    OR the units digit (union, deduped — 19 numbers for any digit).
- *  - 'power' (ပါ၀ါ), 'nekkhat' (နက္ခတ်), 'twin' (အပူး): fixed 10-number
+ *  - 'power' (ပါဝါ), 'nekkhat' (နက္ခတ်), 'twin' (အပူး): fixed 10-number
  *    lists, no digit input required.
  *  - 'kwe' (ခွေ): multi-digit seed (3+ digits) -> every ordered pair of
  *    distinct digit positions, walked in original input order, as a
@@ -365,6 +365,11 @@ export function UserLayout() {
     else setKbAmount('');
   };
 
+  // Tab key — jumps focus between the Number and Amount boxes, replacing
+  // the recording's "/" (straight multi-number) key, which the keypad no
+  // longer exposes.
+  const kbToggleField = () => setKbActiveField(prev => prev === 'number' ? 'amount' : 'number');
+
   const kbPressR = () => {
     if (!/^\d{1,2}$/.test(kbNumber.trim())) { toast.error('Type a 2-digit number first'); return; }
     setKbMode('reverse');
@@ -394,7 +399,7 @@ export function UserLayout() {
   // if any, then opens the confirm dialog for everything gathered so far.
   const kbOpenConfirm = () => {
     let nextPending = kbPending;
-    // Fixed-list modes (ပါ၀ါ/နက္ခတ်/အပူး) need no digit typed in — let a
+    // Fixed-list modes (ပါဝါ/နက္ခတ်/အပူး) need no digit typed in — let a
     // direct OK/Submit commit them even if the number box is empty.
     const isFixedList = kbMode !== null && KB_FIXED_LIST_MODES.includes(kbMode as KbTabId);
     if (kbNumber.trim() || isFixedList) {
@@ -877,29 +882,39 @@ export function UserLayout() {
                       ))}
                     </div>
 
-                    {/* Keypad — digits + function keys (R, /, ENTER, Clear). Nekkhat/
+                    {/* Keypad — digits + function keys (R, Tab, ENTER, Clear). Nekkhat/
                         Kwe/Apar moved into the tab row above now that all 8 patterns
-                        are live, so this is a plain 4x4 grid. */}
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {(['7', '8', '9'] as const).map(d => (
-                        <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
-                      ))}
-                      <button onClick={kbPressR} style={{ padding: '13px 0', borderRadius: 8, fontSize: 14, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>R</button>
+                        are live, so this is a plain 4x4 grid. Sticky to the bottom of
+                        the viewport on mobile so it stays reachable while the pending
+                        list above is scrolled; slightly shorter keys than before to
+                        leave more room for the rest of the screen. */}
+                    <div style={{
+                      position: 'sticky', bottom: 0, zIndex: 6, background: C.card,
+                      marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20,
+                      paddingTop: 8, paddingBottom: `max(8px, env(safe-area-inset-bottom, 0px))`,
+                      borderTop: `1px solid ${C.borderSubtle}`,
+                    }}>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {(['7', '8', '9'] as const).map(d => (
+                          <button key={d} onClick={() => kbAppend(d)} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
+                        ))}
+                        <button onClick={kbPressR} style={{ padding: '10px 0', borderRadius: 8, fontSize: 14, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>R</button>
 
-                      {(['4', '5', '6'] as const).map(d => (
-                        <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
-                      ))}
-                      <button onClick={() => kbAppend('/')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>/</button>
+                        {(['4', '5', '6'] as const).map(d => (
+                          <button key={d} onClick={() => kbAppend(d)} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
+                        ))}
+                        <button onClick={kbToggleField} style={{ padding: '10px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>Tab</button>
 
-                      {(['1', '2', '3'] as const).map(d => (
-                        <button key={d} onClick={() => kbAppend(d)} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
-                      ))}
-                      <button onClick={kbEnter} style={{ padding: '13px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.blueBg, color: C.blueText, border: `1px solid ${C.blue}44` }}>ENTER</button>
+                        {(['1', '2', '3'] as const).map(d => (
+                          <button key={d} onClick={() => kbAppend(d)} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>{d}</button>
+                        ))}
+                        <button onClick={kbEnter} style={{ padding: '10px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.greenBg, color: C.greenText, border: `1px solid ${C.green}44` }}>ENTER</button>
 
-                      <button onClick={kbClearField} style={{ padding: '13px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.redBg, color: C.redText, border: `1px solid ${C.red}44` }}>Clear</button>
-                      <button onClick={() => kbAppend('0')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>0</button>
-                      <button onClick={() => kbAppend('00')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>00</button>
-                      <button onClick={() => kbAppend('000')} style={{ padding: '13px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>000</button>
+                        <button onClick={kbClearField} style={{ padding: '10px 0', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: C.redBg, color: C.redText, border: `1px solid ${C.red}44` }}>Clear</button>
+                        <button onClick={() => kbAppend('0')} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>0</button>
+                        <button onClick={() => kbAppend('00')} style={{ padding: '10px 0', borderRadius: 8, fontSize: 16, fontWeight: 700, cursor: 'pointer', background: C.card2, color: C.text, border: `1px solid ${C.border}` }}>00</button>
+                        <div />
+                      </div>
                     </div>
 
                     {/* Bottom action bar — Cancel wipes the whole pending list, Submit
