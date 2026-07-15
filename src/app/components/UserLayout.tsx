@@ -8,7 +8,7 @@ import { formatIndexValueLines, formatPayoutDetail } from '../utils/format';
 import { useCountdownMs, formatCountdown } from '../utils/countdown';
 
 type Tab = 'entry' | 'history' | 'invoice';
-type EntryMode = 'bulk' | 'keyboard' | 'single';
+type EntryMode = 'bulk' | 'keyboard';
 
 // Keyboard Entry's 8 pattern tabs. Labels are the exact Burmese terms the
 // user specified — no English translations. All 8 rules were confirmed
@@ -175,8 +175,6 @@ export function UserLayout() {
   const [kbPending, setKbPending] = useState<{ number: string; amount: number }[]>([]);
   const [kbShowConfirm, setKbShowConfirm] = useState(false);
 
-  const [singleNum, setSingleNum] = useState('');
-  const [singleAmt, setSingleAmt] = useState('');
   const [dismissedWarnings, setDismissedWarnings] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
 
@@ -458,22 +456,6 @@ export function UserLayout() {
     setKbPending(failed);
   };
 
-  const submitSingle = async () => {
-    const num = singleNum.padStart(2, '0');
-    const amt = parseInt(singleAmt);
-    if (!/^\d{2}$/.test(num) || parseInt(num) > 99) { toast.error('Invalid number'); return; }
-    if (isNaN(amt) || amt <= 0) { toast.error('Invalid amount'); return; }
-
-    const res = await submitBetEntries([{ number: num, amount: amt }]);
-    if (res.error) { toast.error(res.error); return; }
-    const line = res.results[0];
-    if (!line || line.status === 'error') { toast.error(line?.message || 'Entry rejected'); return; }
-
-    toast.success(`Bet #${num} = ${amt.toLocaleString()} submitted`);
-    setSingleNum('');
-    setSingleAmt('');
-  };
-
   // Invoice
   const winNum = session.winningNumber;
   const grossBet = myEntries.reduce((s, e) => s + e.amount, 0);
@@ -648,7 +630,7 @@ export function UserLayout() {
               <>
                 {/* Mode toggle */}
                 <div className="flex gap-1 p-1 rounded-xl w-fit flex-wrap" style={{ background: C.card }}>
-                  {(['bulk', 'keyboard', 'single'] as EntryMode[]).map(m => (
+                  {(['bulk', 'keyboard'] as EntryMode[]).map(m => (
                     <button key={m} onClick={() => setMode(m)}
                       className="px-5 py-2 rounded-lg capitalize"
                       style={{
@@ -657,7 +639,7 @@ export function UserLayout() {
                         border: `1px solid ${mode === m ? C.border : 'transparent'}`,
                         fontSize: 12, fontWeight: mode === m ? 600 : 400, cursor: 'pointer',
                       }}>
-                      {m === 'bulk' ? 'Bulk Entry' : m === 'keyboard' ? 'Keyboard Entry' : 'Single Entry'}
+                      {m === 'bulk' ? 'Bulk Entry' : 'Keyboard Entry'}
                     </button>
                   ))}
                 </div>
@@ -816,7 +798,7 @@ export function UserLayout() {
                       </div>
                     )}
                   </div>
-                ) : mode === 'keyboard' ? (
+                ) : (
                   <div className="rounded-xl p-5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
                     <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 10 }}>KEYBOARD ENTRY</p>
 
@@ -910,12 +892,17 @@ export function UserLayout() {
                         rows (a taller primary key, matches a real calculator's Enter).
                         Sticky to the bottom of the viewport on mobile so it — and the
                         Cancel/Submit bar right under it, bundled into the same dock —
-                        stay reachable while the pending list above is scrolled. */}
+                        stay reachable while the pending list above is scrolled. The
+                        negative bottom margin bleeds through the card's own p-5 bottom
+                        padding so there's no visible gap under Submit/Cancel — the dock
+                        sits flush against the card edge, with matching border radius. */}
                     <div style={{
                       position: 'sticky', bottom: 0, zIndex: 6, background: C.card,
-                      marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20,
+                      marginLeft: -20, marginRight: -20, marginBottom: -20,
+                      paddingLeft: 20, paddingRight: 20,
                       paddingTop: 8, paddingBottom: `max(8px, env(safe-area-inset-bottom, 0px))`,
                       borderTop: `1px solid ${C.borderSubtle}`,
+                      borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
                     }}>
                       <div className="grid grid-cols-4 gap-1.5">
                         {(['7', '8', '9'] as const).map(d => (
@@ -979,54 +966,6 @@ export function UserLayout() {
                         </div>
                       </div>
                     )}
-                  </div>
-                ) : (
-                  <div className="rounded-xl p-5" style={{ background: C.card, border: `1px solid ${C.border}` }}>
-                    <p style={{ color: C.textDim, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 14 }}>SINGLE ENTRY</p>
-                    <div className="flex gap-3 mb-4">
-                      <div style={{ flex: '0 0 100px' }}>
-                        <label style={{ display: 'block', color: C.textMuted, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', marginBottom: 5 }}>NUMBER (00–99)</label>
-                        <input
-                          type="text"
-                          maxLength={2}
-                          value={singleNum}
-                          onChange={e => setSingleNum(e.target.value.replace(/\D/g, ''))}
-                          placeholder="46"
-                          style={{ ...inp, width: '100%', textAlign: 'center', fontSize: 20, fontWeight: 700, letterSpacing: '0.1em' }}
-                        />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', color: C.textMuted, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', marginBottom: 5 }}>AMOUNT</label>
-                        <input
-                          type="number"
-                          value={singleAmt}
-                          onChange={e => setSingleAmt(e.target.value)}
-                          placeholder="500"
-                          style={{ ...inp, width: '100%' }}
-                        />
-                      </div>
-                    </div>
-                    {singleNum.length > 0 && (
-                      <div className="mb-3 p-2 rounded-lg" style={{ background: C.card2 }}>
-                        {(() => {
-                          const num = singleNum.padStart(2, '0');
-                          const totals = getTotals(currentUserId);
-                          const lim = limitTable.find(r => r.number === num)?.limit ?? 0;
-                          const used = totals[num] ?? 0;
-                          const rem = lim - used;
-                          return (
-                            <p style={{ color: rem > 0 ? C.textMuted : C.redText, fontSize: 11 }}>
-                              #{num} — Used: {fmt(used)} / Limit: {fmt(lim)} · Remaining: <strong>{fmt(rem)}</strong>
-                            </p>
-                          );
-                        })()}
-                      </div>
-                    )}
-                    <button onClick={submitSingle}
-                      className="w-full py-3 rounded-xl"
-                      style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
-                      Submit Entry
-                    </button>
                   </div>
                 )}
               </>
