@@ -133,7 +133,7 @@ function parseLine(line: string): { number: string; amount: number }[] | null {
   if (rMatch) {
     const num = rMatch[1].padStart(2, '0');
     const amount = parseInt(rMatch[2]);
-    if (parseInt(num) > 99 || amount <= 0) return null;
+    if (parseInt(num) > 99 || amount < 0) return null;
     const rev = num[1] + num[0];
     if (num === rev) return [{ number: num, amount: amount * 2 }];
     return [{ number: num, amount }, { number: rev, amount }];
@@ -142,7 +142,7 @@ function parseLine(line: string): { number: string; amount: number }[] | null {
   if (m) {
     const num = m[1].padStart(2, '0');
     const amount = parseInt(m[2]);
-    if (parseInt(num) > 99 || amount <= 0) return null;
+    if (parseInt(num) > 99 || amount < 0) return null;
     return [{ number: num, amount }];
   }
   return null;
@@ -156,6 +156,47 @@ const BULK_PLACEHOLDER = `46 = 500
 05 500
 55R500`;
 
+// Draft persistence — mobile browsers/PWAs routinely reload the whole page
+// after the app has been backgrounded for a while (switching to another
+// app and back), which wipes plain React state with no chance for an
+// unmount handler to run. Bulk Entry's text and Keyboard Entry's pending
+// list + in-progress number/amount/mode are mirrored to localStorage per
+// user, keyed so one account's draft never leaks into another's, and
+// restored on mount — so a background-reload no longer loses unsubmitted
+// work. This is a nice-to-have, not a correctness requirement, so every
+// read/write is wrapped and fails silently if storage is unavailable.
+function readDraft<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeDraft(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage full or blocked (e.g. private browsing) — non-fatal.
+  }
+}
+function clearDraft(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Non-fatal.
+  }
+}
+
+type KbDraft = {
+  number: string;
+  amount: string;
+  mode: KbMode;
+  activeField: 'number' | 'amount';
+  pending: { number: string; amount: number }[];
+};
+const KB_DRAFT_EMPTY: KbDraft = { number: '', amount: '', mode: null, activeField: 'number', pending: [] };
+
 export function UserLayout() {
   const {
     logout, currentUserId, session, betEntries, limitTable, users, warnings, submitBetEntries,
@@ -163,17 +204,47 @@ export function UserLayout() {
   } = useApp();
   const [tab, setTab] = useState<Tab>('entry');
   const [mode, setMode] = useState<EntryMode>('bulk');
-  const [bulkText, setBulkText] = useState('');
+
+  // Draft storage keys are per-user so switching accounts on the same
+  // device never shows one user's unsubmitted draft to another.
+  const bulkDraftKey = `treasure_bulk_draft_${currentUserId}`;
+  const kbDraftKey = `treasure_kb_draft_${currentUserId}`;
+
+  const [bulkText, setBulkText] = useState(() => readDraft(bulkDraftKey, ''));
   const [parsed, setParsed] = useState<ParsedLine[] | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
 
+  useEffect(() => {
+    if (bulkText) writeDraft(bulkDraftKey, bulkText);
+    else clearDraft(bulkDraftKey);
+  }, [bulkText, bulkDraftKey]);
+
   // --- Keyboard Entry ---
-  const [kbNumber, setKbNumber] = useState('');
-  const [kbAmount, setKbAmount] = useState('');
-  const [kbActiveField, setKbActiveField] = useState<'number' | 'amount'>('number');
-  const [kbMode, setKbMode] = useState<KbMode>(null);
-  const [kbPending, setKbPending] = useState<{ number: string; amount: number }[]>([]);
+  const [kbNumber, setKbNumber] = useState(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).number);
+  const [kbAmount, setKbAmount] = useState(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).amount);
+  const [kbActiveField, setKbActiveField] = useState<'number' | 'amount'>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).activeField);
+  const [kbMode, setKbMode] = useState<KbMode>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).mode);
+  const [kbPending, setKbPending] = useState<{ number: string; amount: number }[]>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).pending);
   const [kbShowConfirm, setKbShowConfirm] = useState(false);
+
+  useEffect(() => {
+    const isEmpty = kbPending.length === 0 && !kbNumber && !kbAmount && kbMode === null;
+    if (isEmpty) {
+      clearDraft(kbDraftKey);
+    } else {
+      const draft: KbDraft = { number: kbNumber, amount: kbAmount, mode: kbMode, activeField: kbActiveField, pending: kbPending };
+      writeDraft(kbDraftKey, draft);
+    }
+  }, [kbNumber, kbAmount, kbMode, kbActiveField, kbPending, kbDraftKey]);
+  // Computed once when Submit is pressed (kbOpenConfirm) — splits everything
+  // gathered so far into what's within the entry limit and what isn't, so
+  // the confirm modal can show exactly why an entry won't go through before
+  // the user commits. Only `valid` gets submitted; `invalid` stays in the
+  // pending list to edit and resubmit, same recovery pattern as Bulk Entry.
+  const [kbConfirmInfo, setKbConfirmInfo] = useState<{
+    valid: { number: string; amount: number }[];
+    invalid: { number: string; amount: number; error: string }[];
+  } | null>(null);
 
   // Keyboard Entry's bottom dock (Total, Number/Mode/Amount, pattern tabs,
   // keypad, Cancel/Submit) is position:fixed to the viewport so it's always
@@ -413,7 +484,7 @@ export function UserLayout() {
   // recording: after every ENTER, only the number field and mode reset.
   const kbEnter = () => {
     const amt = parseInt(kbAmount || '', 10);
-    if (!kbAmount || isNaN(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+    if (!kbAmount || isNaN(amt) || amt < 0) { toast.error('Enter an amount'); return; }
     const result = computeKbEntries(kbMode, kbNumber, amt);
     if ('error' in result) { toast.error(result.error); return; }
     setKbPending(prev => [...prev, ...result]);
@@ -423,7 +494,11 @@ export function UserLayout() {
   };
 
   // OK — commits whatever's currently sitting in the boxes (same as ENTER)
-  // if any, then opens the confirm dialog for everything gathered so far.
+  // if any, then checks everything gathered so far against each number's
+  // remaining entry limit (same convention as Bulk Entry's pre-submit
+  // check) before opening the confirm dialog. Running totals accumulate as
+  // we walk the list so two pending rows on the same number are checked
+  // against each other too, not just against what's already submitted.
   const kbOpenConfirm = () => {
     let nextPending = kbPending;
     // Fixed-list modes (ပါဝါ/နက္ခတ်/အပူး) need no digit typed in — let a
@@ -431,7 +506,7 @@ export function UserLayout() {
     const isFixedList = kbMode !== null && KB_FIXED_LIST_MODES.includes(kbMode as KbTabId);
     if (kbNumber.trim() || isFixedList) {
       const amt = parseInt(kbAmount || '', 10);
-      if (!kbAmount || isNaN(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+      if (!kbAmount || isNaN(amt) || amt < 0) { toast.error('Enter an amount'); return; }
       const result = computeKbEntries(kbMode, kbNumber, amt);
       if ('error' in result) { toast.error(result.error); return; }
       nextPending = [...kbPending, ...result];
@@ -440,6 +515,22 @@ export function UserLayout() {
       setKbMode(null);
     }
     if (nextPending.length === 0) { toast.error('No entries to submit'); return; }
+
+    const used: Record<string, number> = { ...getTotals(currentUserId) };
+    const valid: { number: string; amount: number }[] = [];
+    const invalid: { number: string; amount: number; error: string }[] = [];
+    for (const e of nextPending) {
+      const lim = limitTable.find(r => r.number === e.number)?.limit ?? 0;
+      const already = used[e.number] ?? 0;
+      const remaining = lim - already;
+      if (e.amount > remaining) {
+        invalid.push({ ...e, error: `Limit exceeded for #${e.number}. Remaining: ${remaining.toLocaleString()}` });
+      } else {
+        valid.push(e);
+        used[e.number] = already + e.amount;
+      }
+    }
+    setKbConfirmInfo({ valid, invalid });
     setKbShowConfirm(true);
   };
 
@@ -449,29 +540,33 @@ export function UserLayout() {
     setKbAmount('');
     setKbMode(null);
     setKbActiveField('number');
+    setKbConfirmInfo(null);
   };
 
   // ပါဝါ/နက္ခတ်/အပူး are fixed-list modes — no number needed, so the Number
   // box is disabled while one of them is selected.
   const kbNumberDisabled = kbMode !== null && KB_FIXED_LIST_MODES.includes(kbMode as KbTabId);
 
+  // Only the limit-valid subset (kbConfirmInfo.valid) is ever sent to the
+  // server. Limit-invalid entries, plus anything the server itself still
+  // rejects, are rebuilt back into kbPending to edit and resubmit — same
+  // "submit valid only, keep invalid to fix" recovery pattern as Bulk Entry.
   const kbSubmit = async () => {
-    if (kbPending.length === 0) { setKbShowConfirm(false); return; }
-    const flat = kbPending.map(p => ({ number: p.number, amount: p.amount }));
-    const res = await submitBetEntries(flat);
+    const info = kbConfirmInfo;
+    if (!info || info.valid.length === 0) { setKbShowConfirm(false); setKbConfirmInfo(null); return; }
+    const res = await submitBetEntries(info.valid);
     setKbShowConfirm(false);
     if (res.error) { toast.error(res.error); return; }
     if (res.insertedCount > 0) {
       toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
     }
-    // Anything the server rejected stays in the pending list to fix and
-    // resubmit — same recovery behavior as Bulk Entry.
-    const failed: { number: string; amount: number }[] = [];
-    res.results.forEach((r, i) => { if (r.status === 'error') failed.push(kbPending[i]); });
-    if (failed.length > 0) {
-      toast.error(`${failed.length} entr${failed.length !== 1 ? 'ies' : 'y'} rejected — left in the list to fix`);
+    const serverRejected: { number: string; amount: number }[] = [];
+    res.results.forEach((r, i) => { if (r.status === 'error') serverRejected.push(info.valid[i]); });
+    if (serverRejected.length > 0) {
+      toast.error(`${serverRejected.length} entr${serverRejected.length !== 1 ? 'ies' : 'y'} rejected — left in the list to fix`);
     }
-    setKbPending(failed);
+    setKbPending([...info.invalid.map(({ error, ...e }) => e), ...serverRejected]);
+    setKbConfirmInfo(null);
   };
 
   // Invoice
@@ -973,24 +1068,45 @@ export function UserLayout() {
                       </div>
                     </div>
 
-                    {/* Confirm modal */}
-                    {kbShowConfirm && (
+                    {/* Confirm modal — shows the valid/invalid breakdown computed
+                        in kbOpenConfirm (checked against each number's remaining
+                        entry limit) before anything is sent to the server. */}
+                    {kbShowConfirm && kbConfirmInfo && (
                       <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
-                        <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+                        <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: C.card, border: `1px solid ${C.border}`, maxHeight: '85vh', overflowY: 'auto' }}>
                           <h2 style={{ color: C.text, fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
                             Confirm Entries
                           </h2>
-                          <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 20 }}>
-                            Submit <strong>{kbPending.length}</strong> entr{kbPending.length !== 1 ? 'ies' : 'y'} totaling{' '}
-                            <strong>{kbPending.reduce((s, p) => s + p.amount, 0).toLocaleString()}</strong>? This can't be undone.
+                          <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 12 }}>
+                            This will submit <strong>{kbConfirmInfo.valid.length}</strong> valid entr{kbConfirmInfo.valid.length !== 1 ? 'ies' : 'y'} totaling{' '}
+                            <strong>{kbConfirmInfo.valid.reduce((s, e) => s + e.amount, 0).toLocaleString()}</strong>. This can't be undone.
                           </p>
+                          {kbConfirmInfo.invalid.length > 0 && (
+                            <div className="mb-3 p-3 rounded-lg" style={{ background: C.redBg, border: `1px solid ${C.red}33` }}>
+                              <p style={{ color: C.redText, fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                                {kbConfirmInfo.invalid.length} invalid entr{kbConfirmInfo.invalid.length !== 1 ? 'ies' : 'y'} will NOT be submitted and will stay in the list for you to fix.
+                              </p>
+                              <div className="space-y-1">
+                                {kbConfirmInfo.invalid.map((e, i) => (
+                                  <p key={i} style={{ color: C.redText, fontSize: 11 }}>
+                                    #{e.number} = {e.amount.toLocaleString()} — {e.error}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div className="flex gap-3">
-                            <button onClick={() => setKbShowConfirm(false)} className="flex-1 py-2.5 rounded-lg"
+                            <button onClick={() => { setKbShowConfirm(false); setKbConfirmInfo(null); }} className="flex-1 py-2.5 rounded-lg"
                               style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 13 }}>
                               Cancel
                             </button>
-                            <button onClick={kbSubmit} className="flex-1 py-2.5 rounded-lg"
-                              style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                            <button onClick={kbSubmit} disabled={kbConfirmInfo.valid.length === 0} className="flex-1 py-2.5 rounded-lg"
+                              style={{
+                                background: kbConfirmInfo.valid.length === 0 ? C.card2 : C.goldGrad,
+                                color: kbConfirmInfo.valid.length === 0 ? C.textDim : '#000',
+                                border: 'none', cursor: kbConfirmInfo.valid.length === 0 ? 'not-allowed' : 'pointer',
+                                fontSize: 13, fontWeight: 700, opacity: kbConfirmInfo.valid.length === 0 ? 0.6 : 1,
+                              }}>
                               Confirm Submit
                             </button>
                           </div>
