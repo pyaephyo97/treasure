@@ -42,12 +42,73 @@ function emptyLimitTable(): LimitRow[] {
   return Array.from({ length: 100 }, (_, i) => ({ number: String(i).padStart(2, '0'), limit: 0 }));
 }
 
-export default function App() {
-  const [loading, setLoading] = useState(true);
-  const [role, setRole] = useState<Role>('login');
-  const [currentUserId, setCurrentUserId] = useState('');
+// --- Resume cache ---------------------------------------------------------
+// Home-screen PWAs on iOS/Android are far more aggressive about killing a
+// backgrounded web app's process than the OS is about suspending a native
+// app — reopening the icon after even a short time away is frequently a
+// full cold restart of the JS runtime, not a resume. There is no way for a
+// web app to prevent the OS from doing this (a real platform limitation,
+// not a bug in this codebase); the only thing under our control is what
+// shows up during that cold restart. Without this cache, every reopen blanks
+// to a "Loading Treasure…" screen for as long as the auth+data bootstrap
+// takes. With it, the last known role/session/profile is restored
+// synchronously on the very first render, so the real layout appears
+// immediately (using that slightly-stale snapshot) instead of a blank
+// screen, while the normal background bootstrap+refreshAll() quietly
+// catches everything up to current within a moment — the same "show the
+// last frame instantly, refresh underneath it" trick native apps get for
+// free from OS-level process suspension.
+const RESUME_CACHE_KEY = 'treasure_resume_v1';
 
-  const [session, setSessionState] = useState<Session>(EMPTY_SESSION);
+type ResumeCache = {
+  role: Role;
+  currentUserId: string;
+  session: Session;
+  myProfile: { username: string; commissionRate: number; payoutRate: number } | null;
+};
+
+function readResumeCache(): ResumeCache | null {
+  try {
+    const raw = localStorage.getItem(RESUME_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.role !== 'string' || typeof parsed.currentUserId !== 'string') return null;
+    return parsed as ResumeCache;
+  } catch {
+    return null;
+  }
+}
+
+function writeResumeCache(cache: ResumeCache) {
+  try {
+    localStorage.setItem(RESUME_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Storage full/blocked — this is a perceived-speed optimization only,
+    // never a correctness requirement, so fail silently.
+  }
+}
+
+function clearResumeCache() {
+  try {
+    localStorage.removeItem(RESUME_CACHE_KEY);
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export default function App() {
+  // `loading` only starts true when there's truly nothing to resume from
+  // (first-ever visit, or the cache was cleared) — every other state below
+  // is optimistically seeded from the resume cache too, so a warm reopen
+  // renders the real layout on the very first frame instead of a blank
+  // "Loading Treasure…" screen. The bootstrap effect further down still
+  // runs in the background either way, to confirm the session is actually
+  // still valid and refresh every list to current.
+  const [loading, setLoading] = useState(() => readResumeCache() === null);
+  const [role, setRole] = useState<Role>(() => readResumeCache()?.role ?? 'login');
+  const [currentUserId, setCurrentUserId] = useState(() => readResumeCache()?.currentUserId ?? '');
+
+  const [session, setSessionState] = useState<Session>(() => readResumeCache()?.session ?? EMPTY_SESSION);
   const [users, setUsersState] = useState<UserAccount[]>([]);
   const [partners, setPartnersState] = useState<PartnerAccount[]>([]);
   const [admins, setAdminsState] = useState<AdminAccount[]>([]);
@@ -58,8 +119,20 @@ export default function App() {
   const [partnerOverLimitHistory, setPartnerOverLimitHistoryState] = useState<PartnerOverLimitEntry[]>([]);
   const [warnings, setWarningsState] = useState<WarningMessage[]>([]);
   const [adminPnl, setAdminPnl] = useState<AdminPnl | null>(null);
-  const [myProfile, setMyProfile] = useState<{ username: string; commissionRate: number; payoutRate: number } | null>(null);
+  const [myProfile, setMyProfile] = useState<{ username: string; commissionRate: number; payoutRate: number } | null>(() => readResumeCache()?.myProfile ?? null);
   const [allSessions, setAllSessionsState] = useState<Session[]>([]);
+
+  // Keeps the resume cache current so the *next* cold restart has a fresh
+  // snapshot to optimistically render from. Cleared the moment we're back
+  // at the login state, so a signed-out device never has a stale identity
+  // lying around to flash on its next open.
+  useEffect(() => {
+    if (role === 'login' || !currentUserId) {
+      clearResumeCache();
+      return;
+    }
+    writeResumeCache({ role, currentUserId, session, myProfile });
+  }, [role, currentUserId, session, myProfile]);
 
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -167,6 +240,7 @@ export default function App() {
         await supabase.auth.signOut();
         setRole('login');
         setCurrentUserId('');
+        clearResumeCache();
         setLoading(false);
         return;
       }
@@ -181,13 +255,28 @@ export default function App() {
       if (data.session) {
         bootstrapForAuthUser();
       } else {
+        // No real session. If we'd optimistically restored a role from the
+        // resume cache (a guess based on last time), this is the
+        // authoritative check correcting it — fall back to the login
+        // screen now that we know for certain there's nothing to resume.
+        setRole('login');
+        setCurrentUserId('');
+        setSessionState(EMPTY_SESSION);
+        setMyProfile(null);
+        clearResumeCache();
         setLoading(false);
       }
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (event === 'SIGNED_IN' && newSession) {
-        setLoading(true);
+        // No blocking full-screen loader here: an interactive login already
+        // gets its own "SIGNING IN…" state from LoginScreen's submit button,
+        // and a resumed session already has role/session/myProfile restored
+        // synchronously from the resume cache above — bootstrapForAuthUser()
+        // just quietly confirms and refreshes everything in the background
+        // either way. Setting `loading` true here was a redundant extra
+        // blank-screen flash on top of both of those.
         bootstrapForAuthUser();
       } else if (event === 'SIGNED_OUT') {
         setRole('login');
@@ -205,6 +294,7 @@ export default function App() {
         setAdminPnl(null);
         setMyProfile(null);
         setAllSessionsState([]);
+        clearResumeCache();
       }
     });
 
