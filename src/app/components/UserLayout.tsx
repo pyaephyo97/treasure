@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { LogOut, Bell, X, AlertCircle, CheckCircle, Copy, CheckCheck, ClipboardList, History, Receipt, CalendarClock, ClipboardPaste, Trash2, Scissors } from 'lucide-react';
+import { LogOut, Bell, X, AlertCircle, Copy, CheckCheck, ClipboardList, History, Receipt, CalendarClock, ClipboardPaste, Trash2, Scissors } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../context';
 import { C } from '../theme';
@@ -146,6 +146,24 @@ function parseLine(line: string): { number: string; amount: number }[] | null {
     return [{ number: num, amount }];
   }
   return null;
+}
+
+// Lines that are clearly metadata pasted alongside real bet data — a date
+// header, a time stamp, a "Total"/"Total Amount"/"Grand Total" summary line
+// from whatever chat or notebook the numbers were copied out of — rather
+// than an actual number=amount line. These are silently skipped during
+// parsing: never shown as invalid, never submitted, so a whole pasted
+// message doesn't need to be hand-trimmed down to just the bet lines first.
+// Bet-line format never uses "/", ":", or the word "total", so there's no
+// realistic collision with a real entry.
+function isIgnorableBulkLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return true;
+  if (/\btotal\b/i.test(t)) return true; // Total / Total Amount / Grand Total
+  if (/^(date|time|amount)\b\s*[:\-]?/i.test(t)) return true; // "Date: ...", "Time - ..."
+  if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}(\s+\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?)?$/i.test(t)) return true; // 22/07/2026, 2026-07-22, with optional trailing time
+  if (/^\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?$/i.test(t)) return true; // bare time, e.g. 12:30 PM
+  return false;
 }
 
 const BULK_PLACEHOLDER = `46 = 500
@@ -330,6 +348,10 @@ export function UserLayout() {
 
     for (const raw of lines) {
       if (!raw.trim()) continue;
+      // Skip metadata lines silently — not a bet line, so not shown as
+      // invalid either. Lets a whole pasted message (with a date header,
+      // time stamp, or a "Total" summary line mixed in) go straight in.
+      if (isIgnorableBulkLine(raw)) continue;
       const parsed = parseLine(raw);
       if (parsed === null) {
         results.push({ raw, entries: [], error: 'Invalid format' });
@@ -832,7 +854,10 @@ export function UserLayout() {
                           )}
                         </div>
 
-                        {/* Quick-fix: strip only the invalid lines, keep valid ones in the box */}
+                        {/* Invalid lines only — valid ones are already covered by the
+                            summary bar above (count + total), no need to list each
+                            one individually. Each invalid line shows its raw text
+                            plus the reason (bad format or over the entry limit). */}
                         {bulkStats.invalidLines.length > 0 && (
                           <div className="p-3 rounded-xl" style={{ background: C.redBg, border: `1px solid ${C.red}33` }}>
                             <div className="flex items-center justify-between gap-2 mb-2">
@@ -843,40 +868,21 @@ export function UserLayout() {
                                 <Scissors size={11} /> Clear Invalid
                               </button>
                             </div>
-                            <div className="space-y-1">
+                            <div className="space-y-2">
                               {bulkStats.invalidLines.map((p, i) => (
-                                <code key={i} style={{ display: 'block', color: C.redText, fontSize: 11, fontFamily: 'monospace' }}>
-                                  {p.raw || '(blank)'}
-                                </code>
+                                <div key={i} className="flex items-start gap-2">
+                                  <AlertCircle size={12} color={C.red} className="flex-shrink-0 mt-0.5" />
+                                  <div className="flex-1 min-w-0">
+                                    <code style={{ display: 'block', color: C.redText, fontSize: 11, fontFamily: 'monospace' }}>
+                                      {p.raw || '(blank)'}
+                                    </code>
+                                    {p.error && <p style={{ color: C.redText, fontSize: 10, opacity: 0.85, marginTop: 1 }}>{p.error}</p>}
+                                  </div>
+                                </div>
                               ))}
                             </div>
                           </div>
                         )}
-
-                        {parsed.map((p, i) => (
-                          <div key={i} className="p-3 rounded-xl"
-                            style={{ background: p.error ? C.redBg : C.greenBg, border: `1px solid ${p.error ? C.red : C.green}33` }}>
-                            <div className="flex items-start gap-2">
-                              {p.error
-                                ? <AlertCircle size={13} color={C.red} className="flex-shrink-0 mt-0.5" />
-                                : <CheckCircle size={13} color={C.green} className="flex-shrink-0 mt-0.5" />}
-                              <div className="flex-1">
-                                <code style={{ color: C.textSub, fontSize: 12, fontFamily: 'monospace' }}>{p.raw}</code>
-                                {p.error
-                                  ? <p style={{ color: C.redText, fontSize: 11, marginTop: 2 }}>{p.error}</p>
-                                  : (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      {p.entries.map((e, j) => (
-                                        <span key={j} style={{ background: C.goldDim, color: C.gold, fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
-                                          #{e.number} = {e.amount.toLocaleString()}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
                       </div>
                     )}
 
