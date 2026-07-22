@@ -244,6 +244,13 @@ export function UserLayout() {
   const [kbMode, setKbMode] = useState<KbMode>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).mode);
   const [kbPending, setKbPending] = useState<{ number: string; amount: number }[]>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).pending);
   const [kbShowConfirm, setKbShowConfirm] = useState(false);
+  // True right after focus auto-jumps (or the user taps) into Amount while
+  // it already holds a leftover value from a previous entry — the next
+  // digit tap then replaces that value outright instead of appending to
+  // it, mirroring a text input landing with its content selected. Cleared
+  // the moment that replacement happens, so digits after the first append
+  // normally.
+  const [kbAmountSelected, setKbAmountSelected] = useState(false);
 
   useEffect(() => {
     const isEmpty = kbPending.length === 0 && !kbNumber && !kbAmount && kbMode === null;
@@ -473,6 +480,11 @@ export function UserLayout() {
       } else {
         setKbNumber(prev => prev + s);
       }
+    } else if (kbAmountSelected) {
+      // Amount was landed on with a leftover value "selected" — the first
+      // digit replaces it outright, then behaves like a normal append.
+      setKbAmount(s);
+      setKbAmountSelected(false);
     } else {
       setKbAmount(prev => prev + s);
     }
@@ -480,25 +492,43 @@ export function UserLayout() {
 
   const kbClearField = () => {
     if (kbActiveField === 'number') setKbNumber('');
-    else setKbAmount('');
+    else { setKbAmount(''); setKbAmountSelected(false); }
+  };
+
+  // Moves focus into Amount — if it already holds a value from a previous
+  // entry, that value is marked "selected" so the next digit replaces it
+  // instead of appending, the same way tabbing into a pre-filled text
+  // input with select-all-on-focus would behave.
+  const focusAmount = () => {
+    setKbActiveField('amount');
+    setKbAmountSelected(kbAmount !== '');
   };
 
   // Tab key — jumps focus between the Number and Amount boxes, replacing
   // the recording's "/" (straight multi-number) key, which the keypad no
   // longer exposes.
-  const kbToggleField = () => setKbActiveField(prev => prev === 'number' ? 'amount' : 'number');
+  const kbToggleField = () => {
+    if (kbActiveField === 'number') focusAmount();
+    else setKbActiveField('number');
+  };
 
   const kbPressR = () => {
     if (!/^\d{1,2}$/.test(kbNumber.trim())) { toast.error('Type a 2-digit number first'); return; }
     setKbMode('reverse');
+    // Number is done (R needs nothing further) — jump straight to Amount,
+    // selecting any leftover value from a previous entry so it's ready to
+    // be typed over.
+    focusAmount();
   };
 
   const kbSelectTab = (t: typeof KB_TABS[number]) => {
     setKbMode(t.id);
     setKbNumber('');
     // Fixed-list modes (ပါဝါ/နက္ခတ်/အပူး) need no number at all — jump
-    // straight to Amount instead of a Number box that's about to be disabled.
-    setKbActiveField(KB_FIXED_LIST_MODES.includes(t.id) ? 'amount' : 'number');
+    // straight to Amount (selecting any leftover value) instead of a
+    // Number box that's about to be disabled.
+    if (KB_FIXED_LIST_MODES.includes(t.id)) focusAmount();
+    else setKbActiveField('number');
   };
 
   // ENTER — commits the current number+mode+amount into the pending list.
@@ -1006,13 +1036,23 @@ export function UserLayout() {
                           <div style={{ ...inp, minWidth: 0, textAlign: 'center', color: C.textDim, fontWeight: 600, background: C.card3 }}>
                             {kbMode === 'reverse' ? 'R' : KB_TABS.find(t => t.id === kbMode)?.label ?? 'ဒဲ့'}
                           </div>
-                          <button onClick={() => setKbActiveField('amount')}
+                          <button onClick={focusAmount}
                             style={{
                               ...inp, minWidth: 0, textAlign: 'center', fontWeight: 700, cursor: 'pointer',
                               background: kbActiveField === 'amount' ? C.card2 : C.card3,
                               border: `1px solid ${kbActiveField === 'amount' ? C.gold : C.border}`,
                             }}>
-                            {kbAmount || <span style={{ color: C.textDim, fontWeight: 400 }}>Amount</span>}
+                            {kbAmount
+                              ? (
+                                // Highlighted like selected text when landed on with a
+                                // leftover value — the next digit replaces it outright.
+                                <span style={kbActiveField === 'amount' && kbAmountSelected
+                                  ? { background: C.gold, color: '#000', borderRadius: 3, padding: '1px 4px' }
+                                  : undefined}>
+                                  {kbAmount}
+                                </span>
+                              )
+                              : <span style={{ color: C.textDim, fontWeight: 400 }}>Amount</span>}
                           </button>
                         </div>
 
