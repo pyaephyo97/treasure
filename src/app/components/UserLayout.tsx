@@ -322,6 +322,28 @@ export function UserLayout() {
   const user = users.find(u => u.id === currentUserId);
   const myEntries = betEntries.filter(e => e.userId === currentUserId);
   const viewedEntries = viewingPastSession ? (historicalEntries ?? []) : myEntries;
+
+  // Groups Entry History by submission batch instead of one flat row per
+  // number. There's no batch id column in bet_entries, but every row from a
+  // single submitBetEntries call goes in inside one submit_bet_entries RPC
+  // invocation, and Postgres's now() is transaction-stable (same value for
+  // every insert in that one call) — so an exact-match on `timestamp`
+  // reliably reconstructs "everything from one submit." Newest batch first.
+  const historyBatches = useMemo(() => {
+    const groups = new Map<string, BetEntry[]>();
+    for (const e of viewedEntries) {
+      const bucket = groups.get(e.timestamp);
+      if (bucket) bucket.push(e);
+      else groups.set(e.timestamp, [e]);
+    }
+    return Array.from(groups.entries())
+      .map(([timestamp, entries]) => ({
+        timestamp,
+        entries,
+        total: entries.reduce((s, e) => s + e.amount, 0),
+      }))
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }, [viewedEntries]);
   const isOpen = session.status === 'open';
   const remainingMs = useCountdownMs(isOpen ? session.autoCloseAt : null);
   // Admin can close just this user's entry (Account Management) without
@@ -1195,33 +1217,34 @@ export function UserLayout() {
               ) : viewedEntries.length === 0 ? (
                 <p style={{ color: C.textDim, fontSize: 13, padding: '32px 20px', textAlign: 'center' }}>No entries for this session</p>
               ) : (
-                <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead style={{ position: 'sticky', top: 0, background: C.card2 }}>
-                      <tr>
-                        {['NUM', 'AMOUNT', 'TIME'].map(h => (
-                          <th key={h} style={{ padding: '10px 16px', textAlign: h === 'AMOUNT' ? 'right' : 'left', color: C.textDim, fontSize: 11, letterSpacing: '0.06em' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...viewedEntries].reverse().map(e => (
-                        <tr key={e.id} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
-                          <td style={{ padding: '10px 16px' }}>
-                            <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{e.number}</span>
-                          </td>
-                          <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                            <span style={{ color: C.text, fontSize: 13 }}>{e.amount.toLocaleString()}</span>
-                          </td>
-                          <td style={{ padding: '10px 16px' }}>
-                            <span style={{ color: C.textDim, fontSize: 12 }}>
-                              {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ maxHeight: 560, overflowY: 'auto' }}>
+                  {historyBatches.map((batch, bi) => (
+                    <div key={batch.timestamp} style={{ borderTop: bi === 0 ? 'none' : `6px solid ${C.bg}` }}>
+                      <div className="px-4 py-2 flex items-center justify-between" style={{ background: C.card2, position: 'sticky', top: 0 }}>
+                        <span style={{ color: C.textDim, fontSize: 11, letterSpacing: '0.04em' }}>
+                          {new Date(batch.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {' · '}{batch.entries.length} {batch.entries.length === 1 ? 'entry' : 'entries'}
+                        </span>
+                        <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>
+                          Total {batch.total.toLocaleString()}
+                        </span>
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <tbody>
+                          {batch.entries.map(e => (
+                            <tr key={e.id} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                              <td style={{ padding: '8px 16px' }}>
+                                <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{e.number}</span>
+                              </td>
+                              <td style={{ padding: '8px 16px', textAlign: 'right' }}>
+                                <span style={{ color: C.text, fontSize: 13 }}>{e.amount.toLocaleString()}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
