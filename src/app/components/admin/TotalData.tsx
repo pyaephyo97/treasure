@@ -98,17 +98,24 @@ export function TotalData() {
     return m;
   }, [shareHistory]);
 
-  // Left panel: EVERY number with bets, shown capped at the limit — this is
-  // the portion Admin holds onto regardless of over-limit sharing (e.g. user
-  // bets 45=50000, limit=30000 → left panel shows 45=30000, not "excluded").
+  // Left panel: EVERY number with bets, shown capped at the limit, minus
+  // whatever has already been shared away to partners this session — once a
+  // number's excess is captured by a confirmed share action it's cut from
+  // Total Data for good, even if the threshold is raised afterward (e.g.
+  // total=700, limit=500 → 200 shared to partners; admin later raises the
+  // limit to 10000 → Within Limit must still show only 500, not 700, since
+  // that 200 already left and belongs to the partner now, not the admin).
   const withinLimitRows = useMemo(() => {
     const rows = allRows
-      .filter(r => r.total > 0)
-      .map(r => ({ number: r.number, total: Math.min(r.total, limitThreshold) }));
+      .map(r => {
+        const effective = Math.max(0, r.total - (alreadyHandledByNumber[r.number] || 0));
+        return { number: r.number, total: Math.min(effective, limitThreshold) };
+      })
+      .filter(r => r.total > 0);
     return sort === 'index'
       ? [...rows].sort((a, b) => a.number.localeCompare(b.number))
       : [...rows].sort((a, b) => b.total - a.total);
-  }, [allRows, sort, limitThreshold]);
+  }, [allRows, sort, limitThreshold, alreadyHandledByNumber]);
 
   // Right panel: the REMAINING over-limit amount not yet captured by a
   // confirmed share action. Once fully shared, a number's remaining amount
