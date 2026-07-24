@@ -93,11 +93,15 @@ export interface AppCtx {
 
   /** Admin "Delete History" (admin/SessionControl.tsx): preview how many bet
    * entries / share actions would be permanently deleted for an arbitrary
-   * (past or current) session, without deleting anything. */
+   * (past or current) session, and whether the session row itself would be
+   * removed too, without deleting anything. */
   previewDeleteHistory: (sessionId: string) => Promise<{ result?: DeleteHistoryResult; error?: string }>;
-  /** Actually performs the deletion previewed above, then refreshes all
-   * session-scoped state (bet entries, share history, partner shares, etc.)
-   * since the deleted session may be the currently live one. */
+  /** Actually performs the deletion previewed above — also removes the
+   * session row itself once its data is cleared, unless data outside the
+   * caller's own scope still references it — then refreshes all
+   * session-scoped state (bet entries, share history, partner shares,
+   * allSessions, etc.) since the deleted session may be the currently live
+   * one, or may no longer exist at all. */
   confirmDeleteHistory: (sessionId: string) => Promise<{ result?: DeleteHistoryResult; error?: string }>;
 
   /** Partner-side "Send" for the currently-outstanding over-sub-limit amount — archives it to History and clears it from the live Over My Limit panel. */

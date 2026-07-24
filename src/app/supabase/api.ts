@@ -295,11 +295,15 @@ export async function sendPartnerOverLimit(sessionId: string, subLimit: number):
 
 /** Admin "Delete History": clears a session's user-submitted bet entries and
  * admin share-to-partner records (share_history, cascading to
- * over_limit_records/partner_shares) via the delete_session_history RPC.
- * dryRun=true previews the counts without deleting anything — same
- * preview-then-confirm shape as distributeOverLimit. Regular Admins are
- * scoped server-side to their own managed users/share actions; Master Admin
- * clears everything for the session. */
+ * over_limit_records/partner_shares) via the delete_session_history RPC,
+ * then also removes the session row itself once its data is cleared (it
+ * used to stay behind on purpose; the account owner didn't want that).
+ * dryRun=true previews the counts (and whether the row would be removed)
+ * without deleting anything — same preview-then-confirm shape as
+ * distributeOverLimit. Regular Admins are scoped server-side to their own
+ * managed users/share actions, so the row is only actually removed once
+ * nothing outside their scope still references it; Master Admin's scope is
+ * everything, so their delete always removes the row too. */
 export async function deleteSessionHistory(sessionId: string, dryRun: boolean): Promise<{ result?: DeleteHistoryResult; error?: string }> {
   const { data, error } = await supabase.rpc('delete_session_history', { p_session_id: sessionId, p_dry_run: dryRun });
   if (error) return { error: error.message };
@@ -308,6 +312,8 @@ export async function deleteSessionHistory(sessionId: string, dryRun: boolean): 
     betEntriesCount: data?.bet_entries_count ?? 0,
     shareHistoryCount: data?.share_history_count ?? 0,
     totalSharedAmount: data?.total_shared_amount ?? 0,
+    willRemoveSession: data?.will_remove_session ?? false,
+    sessionDeleted: data?.session_deleted ?? false,
     dryRun: data?.dry_run ?? dryRun,
   };
   return { result };

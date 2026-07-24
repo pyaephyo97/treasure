@@ -125,7 +125,15 @@ export function SessionControl() {
   }, [deleteSessionId, previewDeleteHistory]);
 
   const deleteTargetSession = allSessions.find(s => s.id === deleteSessionId);
-  const hasNothingToDelete = !!deletePreview && deletePreview.betEntriesCount === 0 && deletePreview.shareHistoryCount === 0;
+  // Deleting is only truly a no-op when there's nothing in scope AND the
+  // session record itself wouldn't be removed either (i.e. other admins'
+  // data elsewhere is what's keeping it non-empty) — if there's no data but
+  // the session WOULD be removed, that's still a meaningful action (cleans
+  // up an empty/accidentally-opened session by name).
+  const isNoOp = !!deletePreview
+    && deletePreview.betEntriesCount === 0
+    && deletePreview.shareHistoryCount === 0
+    && !deletePreview.willRemoveSession;
 
   const handleConfirmDelete = async () => {
     if (!deleteSessionId) return;
@@ -133,7 +141,8 @@ export function SessionControl() {
     const { result, error } = await confirmDeleteHistory(deleteSessionId);
     setDeleting(false);
     if (error) { toast.error(error); return; }
-    toast.success(`Deleted ${result?.betEntriesCount ?? 0} bet entries and ${result?.shareHistoryCount ?? 0} share action(s)`);
+    const dataMsg = `Deleted ${result?.betEntriesCount ?? 0} bet entries and ${result?.shareHistoryCount ?? 0} share action(s)`;
+    toast.success(result?.sessionDeleted ? `${dataMsg} — session removed` : dataMsg);
     setShowDeleteConfirm(false);
     setDeleteSessionId('');
     setDeletePreview(null);
@@ -383,9 +392,9 @@ export function SessionControl() {
         <p style={{ color: C.redText, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 4 }}>DELETE HISTORY</p>
         <p style={{ color: C.textMuted, fontSize: 12, marginBottom: 16 }}>
           Pick a session by name to permanently clear its data — user-submitted bet entries and any confirmed
-          Share-to-Partners records (Total Data). The session itself stays in the list, just with nothing left
-          in it. This cannot be undone.
-          {role === 'admin' && ' As a regular Admin, this only clears your own managed users’ entries and your own share actions — not other admins’ data for the same session.'}
+          Share-to-Partners records (Total Data) — and remove the session itself from the list. This cannot be
+          undone.
+          {role === 'admin' && ' As a regular Admin, this only clears your own managed users’ entries and your own share actions. If another admin still has data in this session, it stays clearable but the session record itself can’t be removed until theirs is cleared too.'}
         </p>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -405,16 +414,27 @@ export function SessionControl() {
             {previewingDelete ? (
               <p style={{ color: C.textDim, fontSize: 12 }}>Checking what would be deleted…</p>
             ) : deletePreview ? (
-              hasNothingToDelete ? (
-                <p style={{ color: C.textDim, fontSize: 12 }}>Nothing to delete — this session already has no data in scope for your account.</p>
-              ) : (
-                <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.6 }}>
-                  Will permanently delete <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.betEntriesCount.toLocaleString()}</span> bet
-                  {' '}{deletePreview.betEntriesCount === 1 ? 'entry' : 'entries'} and{' '}
-                  <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.shareHistoryCount.toLocaleString()}</span> share
-                  {' '}action{deletePreview.shareHistoryCount === 1 ? '' : 's'}
-                  {deletePreview.shareHistoryCount > 0 && ` (${deletePreview.totalSharedAmount.toLocaleString()} total shared)`}.
+              isNoOp ? (
+                <p style={{ color: C.textDim, fontSize: 12 }}>
+                  Nothing to delete — no data in scope for your account, and other admins’ data elsewhere is keeping this session record in place.
                 </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {(deletePreview.betEntriesCount > 0 || deletePreview.shareHistoryCount > 0) && (
+                    <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.6 }}>
+                      Will permanently delete <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.betEntriesCount.toLocaleString()}</span> bet
+                      {' '}{deletePreview.betEntriesCount === 1 ? 'entry' : 'entries'} and{' '}
+                      <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.shareHistoryCount.toLocaleString()}</span> share
+                      {' '}action{deletePreview.shareHistoryCount === 1 ? '' : 's'}
+                      {deletePreview.shareHistoryCount > 0 && ` (${deletePreview.totalSharedAmount.toLocaleString()} total shared)`}.
+                    </p>
+                  )}
+                  <p style={{ color: deletePreview.willRemoveSession ? C.redText : C.textDim, fontSize: 12, fontWeight: deletePreview.willRemoveSession ? 600 : 400 }}>
+                    {deletePreview.willRemoveSession
+                      ? 'The session record itself will also be removed.'
+                      : 'Other admins’ data still exists for this session, so the session record will stay (with your data cleared out of it).'}
+                  </p>
+                </div>
               )
             ) : null}
           </div>
@@ -422,13 +442,13 @@ export function SessionControl() {
 
         <button
           onClick={() => setShowDeleteConfirm(true)}
-          disabled={!deleteSessionId || previewingDelete || hasNothingToDelete}
+          disabled={!deleteSessionId || previewingDelete || isNoOp}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl mt-3"
           style={{
-            background: (!deleteSessionId || previewingDelete || hasNothingToDelete) ? C.card2 : C.redBg,
-            color: (!deleteSessionId || previewingDelete || hasNothingToDelete) ? C.textDim : C.redText,
-            border: `1px solid ${(!deleteSessionId || previewingDelete || hasNothingToDelete) ? C.borderSubtle : C.red + '44'}`,
-            cursor: (!deleteSessionId || previewingDelete || hasNothingToDelete) ? 'not-allowed' : 'pointer',
+            background: (!deleteSessionId || previewingDelete || isNoOp) ? C.card2 : C.redBg,
+            color: (!deleteSessionId || previewingDelete || isNoOp) ? C.textDim : C.redText,
+            border: `1px solid ${(!deleteSessionId || previewingDelete || isNoOp) ? C.borderSubtle : C.red + '44'}`,
+            cursor: (!deleteSessionId || previewingDelete || isNoOp) ? 'not-allowed' : 'pointer',
             fontSize: 13, fontWeight: 700,
           }}>
           <Trash2 size={14} /> Delete History
@@ -480,7 +500,10 @@ export function SessionControl() {
             <AlertTriangle size={16} color={C.red} className="flex-shrink-0 mt-0.5" />
             <p style={{ color: C.redText, fontSize: 12, lineHeight: 1.6 }}>
               This permanently deletes data for <strong>{deleteTargetSession?.label ?? 'this session'}</strong> — it
-              cannot be undone. The session itself is not removed and stays selectable, just with no data in it.
+              cannot be undone.
+              {deletePreview.willRemoveSession
+                ? ' The session record itself will be removed too.'
+                : ' Other admins’ data still exists for this session, so the session record will stay behind (with your data cleared out of it).'}
             </p>
           </div>
           <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 20, lineHeight: 1.6 }}>

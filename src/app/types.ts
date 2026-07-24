@@ -127,12 +127,18 @@ export interface DistributionResult {
 /** Preview or confirmed result from the delete_session_history RPC (Admin
  * "Delete History" — see admin/SessionControl.tsx). Same preview-then-confirm
  * shape as DistributionResult: call once with a dry run to show counts, then
- * again to actually delete. */
+ * again to actually delete. A real (non-dry-run) call also removes the
+ * session row itself once its data is cleared — willRemoveSession predicts
+ * this in the dry-run preview, sessionDeleted reports whether it actually
+ * happened after confirming (it only fails to delete if data outside the
+ * calling admin's own scope, e.g. another admin's entries, still exists). */
 export interface DeleteHistoryResult {
   sessionId: string;
   betEntriesCount: number;
   shareHistoryCount: number;
   totalSharedAmount: number;
+  willRemoveSession: boolean;
+  sessionDeleted: boolean;
   dryRun: boolean;
 }
 
