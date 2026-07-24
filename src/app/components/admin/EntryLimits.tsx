@@ -279,7 +279,7 @@ export function EntryLimits() {
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.card; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}>
                     <span className="w-12 h-8 rounded flex items-center justify-center flex-shrink-0"
-                      style={{ background: C.goldDim, color: C.gold, fontSize: 13, fontWeight: 700 }}>
+                      style={{ background: C.goldDim, color: C.gold, fontSize: 15, fontWeight: 700 }}>
                       {row.number}
                     </span>
                     {editingRow === row.number ? (

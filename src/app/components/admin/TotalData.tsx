@@ -304,7 +304,7 @@ export function TotalData() {
                 ) : withinLimitRows.map(r => (
                   <tr key={r.number} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                     <td style={{ padding: '8px 14px' }}>
-                      <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{r.number}</span>
+                      <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{r.number}</span>
                     </td>
                     <td style={{ padding: '8px 14px', textAlign: 'right' }}>
                       <span style={{ color: C.greenText, fontSize: 13 }}>{r.total.toLocaleString()}</span>
@@ -368,7 +368,7 @@ export function TotalData() {
                     {overLimitRows.map(r => (
                       <tr key={r.number} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                         <td style={{ padding: '8px 14px' }}>
-                          <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{r.number}</span>
+                          <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{r.number}</span>
                         </td>
                         <td style={{ padding: '8px 14px', textAlign: 'right' }}>
                           <span style={{ color: C.orangeText, fontSize: 13, fontWeight: 700 }}>{r.overLimit.toLocaleString()}</span>
@@ -458,7 +458,7 @@ export function TotalData() {
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {entry.overLimitRecords.map(r => (
-                      <span key={r.number} style={{ background: C.card2, color: C.textSub, fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>
+                      <span key={r.number} style={{ background: C.card2, color: C.textSub, fontSize: 13, padding: '2px 8px', borderRadius: 6 }}>
                         {r.number} = {r.overLimitAmount.toLocaleString()}
                       </span>
                     ))}

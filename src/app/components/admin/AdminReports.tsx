@@ -320,7 +320,7 @@ export function AdminReports() {
               ) : rows.map(r => (
                 <tr key={r.number} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                   <td style={{ padding: '9px 14px' }}>
-                    <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{r.number}</span>
+                    <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{r.number}</span>
                   </td>
                   <td style={{ padding: '9px 14px', textAlign: 'right' }}>
                     <span style={{ color: C.text, fontSize: 13 }}>{fmt(r.total)}</span>

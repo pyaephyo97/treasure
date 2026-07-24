@@ -997,7 +997,7 @@ export function UserLayout() {
                             {kbPending.map((p, i) => (
                               <div key={i} className="grid grid-cols-3 items-center" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                                 <span style={{ padding: '7px 10px', fontSize: 12, color: C.textDim }}>{i + 1}</span>
-                                <span style={{ padding: '7px 10px', fontSize: 13, fontWeight: 700, color: C.gold }}>{p.number}</span>
+                                <span style={{ padding: '7px 10px', fontSize: 15, fontWeight: 700, color: C.gold }}>{p.number}</span>
                                 <div className="flex items-center justify-end gap-2" style={{ padding: '7px 10px' }}>
                                   <span style={{ fontSize: 13, color: C.text }}>{p.amount.toLocaleString()}</span>
                                   <button onClick={() => setKbPending(prev => prev.filter((_, j) => j !== i))}
@@ -1234,7 +1234,7 @@ export function UserLayout() {
                           {batch.entries.map(e => (
                             <tr key={e.id} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                               <td style={{ padding: '8px 16px' }}>
-                                <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{e.number}</span>
+                                <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{e.number}</span>
                               </td>
                               <td style={{ padding: '8px 16px', textAlign: 'right' }}>
                                 <span style={{ color: C.text, fontSize: 13 }}>{e.amount.toLocaleString()}</span>
@@ -1319,7 +1319,7 @@ export function UserLayout() {
                       return Object.entries(byNum).sort(([a], [b]) => a.localeCompare(b)).map(([num, amt]) => (
                         <tr key={num} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                           <td style={{ padding: '10px 16px' }}>
-                            <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{num}</span>
+                            <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{num}</span>
                           </td>
                           <td style={{ padding: '10px 16px', textAlign: 'right' }}>
                             <span style={{ color: C.text, fontSize: 13 }}>{fmt(amt)}</span>

@@ -152,7 +152,7 @@ export function Dashboard() {
                   style={{ background: C.card2 }}>
                   <div className="flex items-center gap-3">
                     <span className="w-9 h-6 rounded flex items-center justify-center"
-                      style={{ background: C.goldDim, color: C.gold, fontSize: 12, fontWeight: 700 }}>
+                      style={{ background: C.goldDim, color: C.gold, fontSize: 14, fontWeight: 700 }}>
                       {e.number}
                     </span>
                     <span style={{ color: C.textMuted, fontSize: 12 }}>{u?.username}</span>

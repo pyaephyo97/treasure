@@ -411,7 +411,7 @@ export function PartnerLayout() {
                         ) : withinLimitRows.map(r => (
                           <tr key={r.number} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                             <td style={{ padding: '8px 14px' }}>
-                              <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{r.number}</span>
+                              <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{r.number}</span>
                             </td>
                             <td style={{ padding: '8px 14px', textAlign: 'right' }}>
                               <span style={{ color: C.greenText, fontSize: 13 }}>{fmt(r.amount)}</span>
@@ -474,7 +474,7 @@ export function PartnerLayout() {
                             {overLimitRows.map(r => (
                               <tr key={r.number} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                                 <td style={{ padding: '8px 14px' }}>
-                                  <span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{r.number}</span>
+                                  <span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{r.number}</span>
                                 </td>
                                 <td style={{ padding: '8px 14px', textAlign: 'right' }}>
                                   <span style={{ color: C.orangeText, fontSize: 13, fontWeight: 700 }}>{fmt(r.overLimit)}</span>
@@ -562,7 +562,7 @@ export function PartnerLayout() {
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {entry.records.map(r => (
-                            <span key={r.number} style={{ background: C.card2, color: C.textSub, fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>
+                            <span key={r.number} style={{ background: C.card2, color: C.textSub, fontSize: 13, padding: '2px 8px', borderRadius: 6 }}>
                               {r.number} = {r.overLimitAmount.toLocaleString()}
                             </span>
                           ))}
@@ -652,7 +652,7 @@ export function PartnerLayout() {
                       const over = r.amount > subLimit ? r.amount - subLimit : 0;
                       return (
                         <tr key={r.number} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
-                          <td style={{ padding: '9px 14px' }}><span style={{ color: C.gold, fontSize: 13, fontWeight: 700 }}>{r.number}</span></td>
+                          <td style={{ padding: '9px 14px' }}><span style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>{r.number}</span></td>
                           <td style={{ padding: '9px 14px', textAlign: 'right' }}><span style={{ color: C.text, fontSize: 13 }}>{fmt(r.amount)}</span></td>
                           <td style={{ padding: '9px 14px', textAlign: 'right' }}>
                             <span style={{ color: over > 0 ? C.orangeText : C.textDim, fontSize: 13 }}>{over > 0 ? fmt(over) : '—'}</span>
