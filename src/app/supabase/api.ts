@@ -2,6 +2,7 @@ import { supabase, FUNCTIONS_URL } from './client';
 import type {
   Session, UserAccount, PartnerAccount, AdminAccount, BetEntry, LimitRow, PartnerShare, WarningMessage,
   AdminPnl, BetSubmitResult, DistributionResult, ShareMethod, ShareHistoryEntry, PartnerOverLimitEntry,
+  DeleteHistoryResult,
 } from '../types';
 import {
   type AccountRow, type SessionRow, type BetEntryRow, type EntryLimitRow,
@@ -290,6 +291,26 @@ export async function sendPartnerOverLimit(sessionId: string, subLimit: number):
   const { data, error } = await supabase.rpc('send_partner_over_limit', { p_session_id: sessionId, p_sub_limit: subLimit });
   if (error) return { error: error.message };
   return { totalSentAmount: data?.total_sent_amount ?? 0, message: data?.message };
+}
+
+/** Admin "Delete History": clears a session's user-submitted bet entries and
+ * admin share-to-partner records (share_history, cascading to
+ * over_limit_records/partner_shares) via the delete_session_history RPC.
+ * dryRun=true previews the counts without deleting anything — same
+ * preview-then-confirm shape as distributeOverLimit. Regular Admins are
+ * scoped server-side to their own managed users/share actions; Master Admin
+ * clears everything for the session. */
+export async function deleteSessionHistory(sessionId: string, dryRun: boolean): Promise<{ result?: DeleteHistoryResult; error?: string }> {
+  const { data, error } = await supabase.rpc('delete_session_history', { p_session_id: sessionId, p_dry_run: dryRun });
+  if (error) return { error: error.message };
+  const result: DeleteHistoryResult = {
+    sessionId: data?.session_id ?? sessionId,
+    betEntriesCount: data?.bet_entries_count ?? 0,
+    shareHistoryCount: data?.share_history_count ?? 0,
+    totalSharedAmount: data?.total_shared_amount ?? 0,
+    dryRun: data?.dry_run ?? dryRun,
+  };
+  return { result };
 }
 
 export async function fetchWarnings(sessionId: string): Promise<WarningMessage[]> {

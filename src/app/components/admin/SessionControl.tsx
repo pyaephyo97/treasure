@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { PlayCircle, StopCircle, Send, X, Bell, BellOff, Timer, TimerOff, PauseCircle, PlayCircle as ResumeCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { PlayCircle, StopCircle, Send, X, Bell, BellOff, Timer, TimerOff, PauseCircle, PlayCircle as ResumeCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp } from '../../context';
 import { C } from '../../theme';
 import { useCountdownMs, formatCountdown } from '../../utils/countdown';
+import type { DeleteHistoryResult } from '../../types';
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
@@ -22,7 +23,10 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 
 export function SessionControl() {
-  const { session, openSession, closeSession, setAutoCloseTimer, clearAutoCloseTimer, setEntryHold, clearEntryHold, warnings, sendWarning, retractWarning } = useApp();
+  const {
+    session, openSession, closeSession, setAutoCloseTimer, clearAutoCloseTimer, setEntryHold, clearEntryHold,
+    warnings, sendWarning, retractWarning, role, allSessions, previewDeleteHistory, confirmDeleteHistory,
+  } = useApp();
   const [showOpenConfirm, setShowOpenConfirm] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [warnMsg, setWarnMsg] = useState('');
@@ -31,6 +35,11 @@ export function SessionControl() {
   const [settingTimer, setSettingTimer] = useState(false);
   const [holdMinutesInput, setHoldMinutesInput] = useState('5');
   const [settingHold, setSettingHold] = useState(false);
+  const [deleteSessionId, setDeleteSessionId] = useState('');
+  const [deletePreview, setDeletePreview] = useState<DeleteHistoryResult | null>(null);
+  const [previewingDelete, setPreviewingDelete] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleOpenSession = async () => {
     const { error } = await openSession();
@@ -96,6 +105,38 @@ export function SessionControl() {
     const { error } = await retractWarning(id);
     if (error) { toast.error(error); return; }
     toast.success('Warning removed');
+  };
+
+  // Loads a fresh preview (counts only, nothing deleted) whenever a
+  // different session is picked in the Delete History dropdown — mirrors
+  // the same dry-run-then-confirm pattern Total Data's Share modal already
+  // uses for distribute_over_limit.
+  useEffect(() => {
+    if (!deleteSessionId) { setDeletePreview(null); return; }
+    let cancelled = false;
+    setPreviewingDelete(true);
+    previewDeleteHistory(deleteSessionId).then(({ result, error }) => {
+      if (cancelled) return;
+      setPreviewingDelete(false);
+      if (error) { toast.error(error); setDeletePreview(null); return; }
+      setDeletePreview(result ?? null);
+    });
+    return () => { cancelled = true; };
+  }, [deleteSessionId, previewDeleteHistory]);
+
+  const deleteTargetSession = allSessions.find(s => s.id === deleteSessionId);
+  const hasNothingToDelete = !!deletePreview && deletePreview.betEntriesCount === 0 && deletePreview.shareHistoryCount === 0;
+
+  const handleConfirmDelete = async () => {
+    if (!deleteSessionId) return;
+    setDeleting(true);
+    const { result, error } = await confirmDeleteHistory(deleteSessionId);
+    setDeleting(false);
+    if (error) { toast.error(error); return; }
+    toast.success(`Deleted ${result?.betEntriesCount ?? 0} bet entries and ${result?.shareHistoryCount ?? 0} share action(s)`);
+    setShowDeleteConfirm(false);
+    setDeleteSessionId('');
+    setDeletePreview(null);
   };
 
   const fmt = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
@@ -337,6 +378,63 @@ export function SessionControl() {
         )}
       </div>
 
+      {/* Delete History */}
+      <div className="rounded-2xl p-6" style={{ background: C.card, border: `1px solid ${C.red}33` }}>
+        <p style={{ color: C.redText, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 4 }}>DELETE HISTORY</p>
+        <p style={{ color: C.textMuted, fontSize: 12, marginBottom: 16 }}>
+          Pick a session by name to permanently clear its data — user-submitted bet entries and any confirmed
+          Share-to-Partners records (Total Data). The session itself stays in the list, just with nothing left
+          in it. This cannot be undone.
+          {role === 'admin' && ' As a regular Admin, this only clears your own managed users’ entries and your own share actions — not other admins’ data for the same session.'}
+        </p>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <select
+            value={deleteSessionId}
+            onChange={e => setDeleteSessionId(e.target.value)}
+            style={{ ...inp, flex: 1, minWidth: 200 }}>
+            <option value="">Select a session…</option>
+            {allSessions.map(s => (
+              <option key={s.id} value={s.id}>{s.label} — {s.status}{s.winningNumber ? ` — #${s.winningNumber}` : ''}</option>
+            ))}
+          </select>
+        </div>
+
+        {deleteSessionId && (
+          <div className="mt-3 p-3 rounded-xl" style={{ background: C.card2, border: `1px solid ${C.border}` }}>
+            {previewingDelete ? (
+              <p style={{ color: C.textDim, fontSize: 12 }}>Checking what would be deleted…</p>
+            ) : deletePreview ? (
+              hasNothingToDelete ? (
+                <p style={{ color: C.textDim, fontSize: 12 }}>Nothing to delete — this session already has no data in scope for your account.</p>
+              ) : (
+                <p style={{ color: C.textMuted, fontSize: 12, lineHeight: 1.6 }}>
+                  Will permanently delete <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.betEntriesCount.toLocaleString()}</span> bet
+                  {' '}{deletePreview.betEntriesCount === 1 ? 'entry' : 'entries'} and{' '}
+                  <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.shareHistoryCount.toLocaleString()}</span> share
+                  {' '}action{deletePreview.shareHistoryCount === 1 ? '' : 's'}
+                  {deletePreview.shareHistoryCount > 0 && ` (${deletePreview.totalSharedAmount.toLocaleString()} total shared)`}.
+                </p>
+              )
+            ) : null}
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowDeleteConfirm(true)}
+          disabled={!deleteSessionId || previewingDelete || hasNothingToDelete}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl mt-3"
+          style={{
+            background: (!deleteSessionId || previewingDelete || hasNothingToDelete) ? C.card2 : C.redBg,
+            color: (!deleteSessionId || previewingDelete || hasNothingToDelete) ? C.textDim : C.redText,
+            border: `1px solid ${(!deleteSessionId || previewingDelete || hasNothingToDelete) ? C.borderSubtle : C.red + '44'}`,
+            cursor: (!deleteSessionId || previewingDelete || hasNothingToDelete) ? 'not-allowed' : 'pointer',
+            fontSize: 13, fontWeight: 700,
+          }}>
+          <Trash2 size={14} /> Delete History
+        </button>
+      </div>
+
       {/* Open confirm */}
       {showOpenConfirm && (
         <Modal title="Open New Session?" onClose={() => setShowOpenConfirm(false)}>
@@ -370,6 +468,35 @@ export function SessionControl() {
             <button onClick={handleCloseSession} className="flex-1 py-2.5 rounded-lg"
               style={{ background: C.red, color: '#fff', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
               Close Session
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete History confirm */}
+      {showDeleteConfirm && deletePreview && (
+        <Modal title="Delete Session History?" onClose={() => setShowDeleteConfirm(false)}>
+          <div className="flex items-start gap-3 p-3 rounded-xl mb-4" style={{ background: C.redBg }}>
+            <AlertTriangle size={16} color={C.red} className="flex-shrink-0 mt-0.5" />
+            <p style={{ color: C.redText, fontSize: 12, lineHeight: 1.6 }}>
+              This permanently deletes data for <strong>{deleteTargetSession?.label ?? 'this session'}</strong> — it
+              cannot be undone. The session itself is not removed and stays selectable, just with no data in it.
+            </p>
+          </div>
+          <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 20, lineHeight: 1.6 }}>
+            <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.betEntriesCount.toLocaleString()}</span> bet
+            {' '}{deletePreview.betEntriesCount === 1 ? 'entry' : 'entries'} and{' '}
+            <span style={{ color: C.text, fontWeight: 700 }}>{deletePreview.shareHistoryCount.toLocaleString()}</span> share
+            {' '}action{deletePreview.shareHistoryCount === 1 ? '' : 's'} will be deleted.
+          </p>
+          <div className="flex gap-3">
+            <button onClick={() => setShowDeleteConfirm(false)} disabled={deleting} className="flex-1 py-2.5 rounded-lg"
+              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13 }}>
+              Cancel
+            </button>
+            <button onClick={handleConfirmDelete} disabled={deleting} className="flex-1 py-2.5 rounded-lg"
+              style={{ background: C.red, color: '#fff', border: 'none', cursor: deleting ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>
+              {deleting ? 'Deleting…' : 'Delete Permanently'}
             </button>
           </div>
         </Modal>

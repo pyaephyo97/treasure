@@ -3,6 +3,7 @@ import type {
   Role, Session, UserAccount, PartnerAccount, AdminAccount,
   BetEntry, LimitRow, PartnerShare, WarningMessage,
   AdminPnl, BetSubmitResult, DistributionResult, ShareMethod, ShareHistoryEntry, PartnerOverLimitEntry,
+  DeleteHistoryResult,
 } from './types';
 
 export type AccountTab = 'users' | 'partners' | 'admins';
@@ -89,6 +90,15 @@ export interface AppCtx {
   previewDistribution: (shareMethod: ShareMethod, setLimit: number, partnerIds?: string[]) => Promise<{ result?: DistributionResult; error?: string }>;
   confirmDistribution: (shareMethod: ShareMethod, setLimit: number, partnerIds?: string[]) => Promise<{ result?: DistributionResult; error?: string }>;
   refreshAdminPnl: () => Promise<void>;
+
+  /** Admin "Delete History" (admin/SessionControl.tsx): preview how many bet
+   * entries / share actions would be permanently deleted for an arbitrary
+   * (past or current) session, without deleting anything. */
+  previewDeleteHistory: (sessionId: string) => Promise<{ result?: DeleteHistoryResult; error?: string }>;
+  /** Actually performs the deletion previewed above, then refreshes all
+   * session-scoped state (bet entries, share history, partner shares, etc.)
+   * since the deleted session may be the currently live one. */
+  confirmDeleteHistory: (sessionId: string) => Promise<{ result?: DeleteHistoryResult; error?: string }>;
 
   /** Partner-side "Send" for the currently-outstanding over-sub-limit amount — archives it to History and clears it from the live Over My Limit panel. */
   sendPartnerOverLimit: (subLimit: number) => Promise<{ error?: string; totalSentAmount?: number; message?: string }>;

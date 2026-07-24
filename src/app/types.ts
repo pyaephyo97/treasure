@@ -124,6 +124,18 @@ export interface DistributionResult {
   message?: string;
 }
 
+/** Preview or confirmed result from the delete_session_history RPC (Admin
+ * "Delete History" — see admin/SessionControl.tsx). Same preview-then-confirm
+ * shape as DistributionResult: call once with a dry run to show counts, then
+ * again to actually delete. */
+export interface DeleteHistoryResult {
+  sessionId: string;
+  betEntriesCount: number;
+  shareHistoryCount: number;
+  totalSharedAmount: number;
+  dryRun: boolean;
+}
+
 /**
  * A single confirmed "Share to Partners" action, recorded permanently once
  * distribute_over_limit runs with dryRun=false. Once a number's over-limit

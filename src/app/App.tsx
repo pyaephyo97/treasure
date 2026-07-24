@@ -599,6 +599,21 @@ export default function App() {
     return res;
   }, [session.id]);
 
+  const previewDeleteHistoryAction = useCallback(async (sessionId: string) => {
+    return api.deleteSessionHistory(sessionId, true);
+  }, []);
+
+  const confirmDeleteHistoryAction = useCallback(async (sessionId: string) => {
+    const res = await api.deleteSessionHistory(sessionId, false);
+    // The deleted session might be the currently live one (its bet entries,
+    // share history, and partner shares are all loaded into App state), or
+    // it might be a past session nobody currently has open — refreshAll()
+    // handles both correctly with one call rather than needing to special-
+    // case which session was targeted.
+    if (!res.error) await refreshAll();
+    return res;
+  }, [refreshAll]);
+
   const sendPartnerOverLimitAction = useCallback(async (subLimit: number) => {
     if (!session.id) return { error: 'No active session' };
     const res = await api.sendPartnerOverLimit(session.id, subLimit);
@@ -670,6 +685,7 @@ export default function App() {
       assignLimitTable: assignLimitTableAction,
       submitBetEntries: submitBetEntriesAction,
       previewDistribution: previewDistributionAction, confirmDistribution: confirmDistributionAction,
+      previewDeleteHistory: previewDeleteHistoryAction, confirmDeleteHistory: confirmDeleteHistoryAction,
       sendPartnerOverLimit: sendPartnerOverLimitAction,
       setMySubLimit: setMySubLimitAction,
       setMyAdminRates: setMyAdminRatesAction,
