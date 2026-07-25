@@ -231,6 +231,13 @@ export function UserLayout() {
   const [bulkText, setBulkText] = useState(() => readDraft(bulkDraftKey, ''));
   const [parsed, setParsed] = useState<ParsedLine[] | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  // Guards against the double/triple-tap duplicate-submit bug: on a slow
+  // connection there's a real gap between tapping Confirm Submit and the
+  // request actually completing, and with no visible feedback in that gap
+  // users would tap again (and again), firing the same bet entries multiple
+  // times. This flips the button to a disabled "Submitting…" state on the
+  // very first tap and ignores everything until the request settles.
+  const [submittingBulk, setSubmittingBulk] = useState(false);
 
   useEffect(() => {
     if (bulkText) writeDraft(bulkDraftKey, bulkText);
@@ -244,6 +251,9 @@ export function UserLayout() {
   const [kbMode, setKbMode] = useState<KbMode>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).mode);
   const [kbPending, setKbPending] = useState<{ number: string; amount: number }[]>(() => readDraft(kbDraftKey, KB_DRAFT_EMPTY).pending);
   const [kbShowConfirm, setKbShowConfirm] = useState(false);
+  // Same double-tap guard as submittingBulk, for Keyboard Entry's Confirm
+  // Submit button.
+  const [submittingKb, setSubmittingKb] = useState(false);
   // True right after focus auto-jumps (or the user taps) into Amount while
   // it already holds a leftover value from a previous entry — the next
   // digit tap then replaces that value outright instead of appending to
@@ -438,56 +448,65 @@ export function UserLayout() {
 
   const submitBulk = async () => {
     if (!parsed) return;
-    // Map each flat bet entry back to its index in the FULL `parsed` array
-    // (not just the valid subset) so that after submission we can rebuild
-    // bulkText from exactly the lines that still need attention. Format-
-    // invalid lines are never included in `flat` / submitted at all, so
-    // they must never be silently dropped from the box afterward.
-    const flat: { number: string; amount: number }[] = [];
-    const ownerIndex: number[] = [];
-    parsed.forEach((p, idx) => {
-      if (p.error) return;
-      p.entries.forEach(e => { flat.push({ number: e.number, amount: e.amount }); ownerIndex.push(idx); });
-    });
+    // Re-entrancy guard — see submittingBulk above. A second tap while the
+    // first request is still in flight is simply ignored rather than firing
+    // a duplicate submission.
+    if (submittingBulk) return;
+    setSubmittingBulk(true);
+    try {
+      // Map each flat bet entry back to its index in the FULL `parsed` array
+      // (not just the valid subset) so that after submission we can rebuild
+      // bulkText from exactly the lines that still need attention. Format-
+      // invalid lines are never included in `flat` / submitted at all, so
+      // they must never be silently dropped from the box afterward.
+      const flat: { number: string; amount: number }[] = [];
+      const ownerIndex: number[] = [];
+      parsed.forEach((p, idx) => {
+        if (p.error) return;
+        p.entries.forEach(e => { flat.push({ number: e.number, amount: e.amount }); ownerIndex.push(idx); });
+      });
 
-    if (!flat.length) { toast.error('No valid lines to submit'); setShowBulkConfirm(false); return; }
+      if (!flat.length) { toast.error('No valid lines to submit'); setShowBulkConfirm(false); return; }
 
-    const res = await submitBetEntries(flat);
-    setShowBulkConfirm(false);
-    if (res.error) { toast.error(res.error); return; }
+      const res = await submitBetEntries(flat);
+      setShowBulkConfirm(false);
+      if (res.error) { toast.error(res.error); return; }
 
-    if (res.insertedCount > 0) {
-      toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
+      if (res.insertedCount > 0) {
+        toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
+      }
+
+      const failedOriginalIndices = new Set<number>();
+      res.results.forEach((r, i) => {
+        if (r.status === 'error') failedOriginalIndices.add(ownerIndex[i]);
+      });
+
+      // Keep: lines that were format/limit-invalid to begin with, plus any
+      // valid-looking lines the server itself rejected (attach its message).
+      // Drop: lines that submitted successfully.
+      const remaining = parsed
+        .map((p, idx) => {
+          if (!p.error && !failedOriginalIndices.has(idx)) return null;
+          if (failedOriginalIndices.has(idx) && !p.error) {
+            const errs = res.results
+              .filter((r, i) => ownerIndex[i] === idx && r.status === 'error')
+              .map(r => r.message)
+              .filter(Boolean);
+            return { ...p, error: errs.join('; ') || 'Rejected by server' };
+          }
+          return p;
+        })
+        .filter((p): p is ParsedLine => p !== null);
+
+      if (failedOriginalIndices.size > 0) {
+        toast.error(`${failedOriginalIndices.size} line${failedOriginalIndices.size !== 1 ? 's' : ''} rejected — see details below`);
+      }
+
+      setBulkText(remaining.map(p => p.raw).join('\n'));
+      setParsed(remaining.length ? remaining : null);
+    } finally {
+      setSubmittingBulk(false);
     }
-
-    const failedOriginalIndices = new Set<number>();
-    res.results.forEach((r, i) => {
-      if (r.status === 'error') failedOriginalIndices.add(ownerIndex[i]);
-    });
-
-    // Keep: lines that were format/limit-invalid to begin with, plus any
-    // valid-looking lines the server itself rejected (attach its message).
-    // Drop: lines that submitted successfully.
-    const remaining = parsed
-      .map((p, idx) => {
-        if (!p.error && !failedOriginalIndices.has(idx)) return null;
-        if (failedOriginalIndices.has(idx) && !p.error) {
-          const errs = res.results
-            .filter((r, i) => ownerIndex[i] === idx && r.status === 'error')
-            .map(r => r.message)
-            .filter(Boolean);
-          return { ...p, error: errs.join('; ') || 'Rejected by server' };
-        }
-        return p;
-      })
-      .filter((p): p is ParsedLine => p !== null);
-
-    if (failedOriginalIndices.size > 0) {
-      toast.error(`${failedOriginalIndices.size} line${failedOriginalIndices.size !== 1 ? 's' : ''} rejected — see details below`);
-    }
-
-    setBulkText(remaining.map(p => p.raw).join('\n'));
-    setParsed(remaining.length ? remaining : null);
   };
 
   // --- Keyboard Entry — numeric keypad + pattern tabs, matching the
@@ -628,19 +647,26 @@ export function UserLayout() {
   const kbSubmit = async () => {
     const info = kbConfirmInfo;
     if (!info || info.valid.length === 0) { setKbShowConfirm(false); setKbConfirmInfo(null); return; }
-    const res = await submitBetEntries(info.valid);
-    setKbShowConfirm(false);
-    if (res.error) { toast.error(res.error); return; }
-    if (res.insertedCount > 0) {
-      toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
+    // Re-entrancy guard — see submittingKb above.
+    if (submittingKb) return;
+    setSubmittingKb(true);
+    try {
+      const res = await submitBetEntries(info.valid);
+      setKbShowConfirm(false);
+      if (res.error) { toast.error(res.error); return; }
+      if (res.insertedCount > 0) {
+        toast.success(`${res.insertedCount} bet${res.insertedCount !== 1 ? 's' : ''} submitted`);
+      }
+      const serverRejected: { number: string; amount: number }[] = [];
+      res.results.forEach((r, i) => { if (r.status === 'error') serverRejected.push(info.valid[i]); });
+      if (serverRejected.length > 0) {
+        toast.error(`${serverRejected.length} entr${serverRejected.length !== 1 ? 'ies' : 'y'} rejected — left in the list to fix`);
+      }
+      setKbPending([...info.invalid.map(({ error, ...e }) => e), ...serverRejected]);
+      setKbConfirmInfo(null);
+    } finally {
+      setSubmittingKb(false);
     }
-    const serverRejected: { number: string; amount: number }[] = [];
-    res.results.forEach((r, i) => { if (r.status === 'error') serverRejected.push(info.valid[i]); });
-    if (serverRejected.length > 0) {
-      toast.error(`${serverRejected.length} entr${serverRejected.length !== 1 ? 'ies' : 'y'} rejected — left in the list to fix`);
-    }
-    setKbPending([...info.invalid.map(({ error, ...e }) => e), ...serverRejected]);
-    setKbConfirmInfo(null);
   };
 
   // Invoice
@@ -960,13 +986,13 @@ export function UserLayout() {
                             Only the valid lines above will be sent. Continue?
                           </p>
                           <div className="flex gap-3">
-                            <button onClick={() => setShowBulkConfirm(false)} className="flex-1 py-2.5 rounded-lg"
-                              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 13 }}>
+                            <button onClick={() => setShowBulkConfirm(false)} disabled={submittingBulk} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: submittingBulk ? 'not-allowed' : 'pointer', fontSize: 13, opacity: submittingBulk ? 0.6 : 1 }}>
                               Cancel
                             </button>
-                            <button onClick={submitBulk} className="flex-1 py-2.5 rounded-lg"
-                              style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-                              Confirm Submit
+                            <button onClick={submitBulk} disabled={submittingBulk} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.goldGrad, color: '#000', border: 'none', cursor: submittingBulk ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, opacity: submittingBulk ? 0.7 : 1 }}>
+                              {submittingBulk ? 'Submitting…' : 'Confirm Submit'}
                             </button>
                           </div>
                         </div>
@@ -1164,18 +1190,18 @@ export function UserLayout() {
                             </div>
                           )}
                           <div className="flex gap-3">
-                            <button onClick={() => { setKbShowConfirm(false); setKbConfirmInfo(null); }} className="flex-1 py-2.5 rounded-lg"
-                              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 13 }}>
+                            <button onClick={() => { setKbShowConfirm(false); setKbConfirmInfo(null); }} disabled={submittingKb} className="flex-1 py-2.5 rounded-lg"
+                              style={{ background: C.card2, color: C.textMuted, border: `1px solid ${C.border}`, cursor: submittingKb ? 'not-allowed' : 'pointer', fontSize: 13, opacity: submittingKb ? 0.6 : 1 }}>
                               Cancel
                             </button>
-                            <button onClick={kbSubmit} disabled={kbConfirmInfo.valid.length === 0} className="flex-1 py-2.5 rounded-lg"
+                            <button onClick={kbSubmit} disabled={kbConfirmInfo.valid.length === 0 || submittingKb} className="flex-1 py-2.5 rounded-lg"
                               style={{
-                                background: kbConfirmInfo.valid.length === 0 ? C.card2 : C.goldGrad,
-                                color: kbConfirmInfo.valid.length === 0 ? C.textDim : '#000',
-                                border: 'none', cursor: kbConfirmInfo.valid.length === 0 ? 'not-allowed' : 'pointer',
-                                fontSize: 13, fontWeight: 700, opacity: kbConfirmInfo.valid.length === 0 ? 0.6 : 1,
+                                background: (kbConfirmInfo.valid.length === 0 || submittingKb) ? C.card2 : C.goldGrad,
+                                color: (kbConfirmInfo.valid.length === 0 || submittingKb) ? C.textDim : '#000',
+                                border: 'none', cursor: (kbConfirmInfo.valid.length === 0 || submittingKb) ? 'not-allowed' : 'pointer',
+                                fontSize: 13, fontWeight: 700, opacity: (kbConfirmInfo.valid.length === 0 || submittingKb) ? 0.6 : 1,
                               }}>
-                              Confirm Submit
+                              {submittingKb ? 'Submitting…' : 'Confirm Submit'}
                             </button>
                           </div>
                         </div>

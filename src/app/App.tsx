@@ -227,13 +227,34 @@ export default function App() {
     setMyProfile(account ? { username: account.username, commissionRate: account.commissionRate, payoutRate: account.payoutRate } : null);
   }, []);
 
-  // --- bootstrap auth + subscribe to auth state changes ---
-  useEffect(() => {
-    let cancelled = false;
-
+  // --- resilient "is there still a valid session" check ---
+  // Android/PWA note: backgrounding this app (switching apps, locking the
+  // screen, or even just leaving the browser tab for a while) frequently
+  // gets the whole page torn down and reloaded from scratch when the user
+  // comes back — a real OS memory-pressure behavior on Android, not
+  // something a web app can prevent (see the resume-cache comment above).
+  // The very first thing a fresh reload does is ask Supabase "is there
+  // still a session?" via getSession(). That call can fail transiently
+  // right at that exact moment — the JS engine is often resumed a beat
+  // before the OS network stack has finished reconnecting — and the old
+  // code here treated ANY session-less response (including a network
+  // error) as definitive proof the user had been signed out, wiping the
+  // resume cache and forcing back to the login screen even though the
+  // refresh token on disk was still perfectly valid. That's what was
+  // reported as "account signs out automatically" after backgrounding.
+  //
+  // recheckAuthSession() only treats a session-less response as a REAL
+  // logout when Supabase reports no error alongside it. A network/transient
+  // error instead gets a few retries with backoff; if it's still
+  // unresolved after those, whatever's already on screen (the
+  // optimistically-restored resume-cache state, if any) is left alone
+  // rather than forcing a sign-out purely because of a momentary
+  // connectivity gap — the account stays signed in, and this same check
+  // fires again on the next visibility/online event to quietly resolve
+  // itself once the connection is back.
+  const recheckAuthSession = useCallback(async (attempt = 0): Promise<void> => {
     async function bootstrapForAuthUser() {
       const account = await api.getMyAccount();
-      if (cancelled) return;
       if (!account) {
         // Authenticated with Supabase Auth but no matching accounts row —
         // treat as logged out instead of rendering a broken layout.
@@ -247,37 +268,50 @@ export default function App() {
       setCurrentUserId(account.id);
       setRole(dbRoleToUiRole(account.role));
       await refreshAll();
-      if (!cancelled) setLoading(false);
+      setLoading(false);
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
-      if (data.session) {
-        bootstrapForAuthUser();
+    const { data, error } = await supabase.auth.getSession();
+
+    if (data.session) {
+      await bootstrapForAuthUser();
+      return;
+    }
+
+    if (error) {
+      if (attempt < 3) {
+        setTimeout(() => { recheckAuthSession(attempt + 1); }, 600 * Math.pow(2, attempt));
       } else {
-        // No real session. If we'd optimistically restored a role from the
-        // resume cache (a guess based on last time), this is the
-        // authoritative check correcting it — fall back to the login
-        // screen now that we know for certain there's nothing to resume.
-        setRole('login');
-        setCurrentUserId('');
-        setSessionState(EMPTY_SESSION);
-        setMyProfile(null);
-        clearResumeCache();
         setLoading(false);
       }
-    });
+      return;
+    }
+
+    // No error AND no session — Supabase has authoritatively confirmed
+    // there's nothing to resume. This is the only path allowed to force
+    // the login screen / clear the resume cache.
+    setRole('login');
+    setCurrentUserId('');
+    setSessionState(EMPTY_SESSION);
+    setMyProfile(null);
+    clearResumeCache();
+    setLoading(false);
+  }, [refreshAll]);
+
+  // --- bootstrap auth + subscribe to auth state changes ---
+  useEffect(() => {
+    recheckAuthSession();
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (event === 'SIGNED_IN' && newSession) {
         // No blocking full-screen loader here: an interactive login already
         // gets its own "SIGNING IN…" state from LoginScreen's submit button,
         // and a resumed session already has role/session/myProfile restored
-        // synchronously from the resume cache above — bootstrapForAuthUser()
+        // synchronously from the resume cache above — recheckAuthSession()
         // just quietly confirms and refreshes everything in the background
         // either way. Setting `loading` true here was a redundant extra
         // blank-screen flash on top of both of those.
-        bootstrapForAuthUser();
+        recheckAuthSession();
       } else if (event === 'SIGNED_OUT') {
         setRole('login');
         setCurrentUserId('');
@@ -299,10 +333,26 @@ export default function App() {
     });
 
     return () => {
-      cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, [refreshAll]);
+  }, [recheckAuthSession]);
+
+  // Proactively re-verifies the session when the app regains focus or
+  // network connectivity, instead of waiting for the next API call to fail.
+  // This covers the case where the JS process survived backgrounding (so
+  // this is a genuine visibility change rather than the full cold restart
+  // recheckAuthSession's own retry logic above already handles) but its
+  // token refresh got skipped or throttled while the tab was hidden.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') recheckAuthSession(); };
+    const onOnline = () => recheckAuthSession();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [recheckAuthSession]);
 
   // --- realtime subscriptions ---
   useEffect(() => {
