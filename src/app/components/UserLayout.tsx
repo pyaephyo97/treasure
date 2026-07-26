@@ -729,9 +729,7 @@ export function UserLayout() {
           paddingTop: `calc(12px + ${headerSafeTop})`, paddingBottom: 12,
         }}>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: C.goldGrad }}>
-            <span style={{ fontSize: 12 }}>♦</span>
-          </div>
+          <img src="/brand/treasure-icon-web.svg" alt="Treasure" className="w-7 h-7 rounded-lg" />
           <span style={{ color: C.gold, fontSize: 13, fontWeight: 800, letterSpacing: '0.08em' }}>TREASURE</span>
         </div>
         <div className="flex-1 flex items-center justify-center gap-2 flex-wrap min-w-0">

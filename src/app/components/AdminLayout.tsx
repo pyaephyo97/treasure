@@ -52,10 +52,7 @@ export function AdminLayout() {
       style={{ background: 'linear-gradient(180deg, #0F1728 0%, #07080D 100%)', borderRight: `1px solid ${C.border}` }}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5" style={{ borderBottom: `1px solid ${C.border}` }}>
-        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: C.goldGrad }}>
-          <span style={{ fontSize: 16 }}>♦</span>
-        </div>
+        <img src="/brand/treasure-icon-web.svg" alt="Treasure" className="w-9 h-9 rounded-lg flex-shrink-0" />
         <div>
           <p style={{ color: C.gold, fontSize: 15, fontWeight: 800, letterSpacing: '0.1em', lineHeight: 1 }}>TREASURE</p>
           <p style={{ color: C.textDim, fontSize: 10, marginTop: 2, letterSpacing: '0.04em' }}>

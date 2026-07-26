@@ -1,6 +1,6 @@
 # Treasure — Project Spec & Maintenance Guide
 
-Last updated: 2026-07-11, after a full codebase audit and performance pass. This document is the reference for anyone (including a future AI session) picking this project back up.
+Last updated: 2026-07-27, after replacing the app's placeholder icon/logo with the account owner's real branding assets. This document is the reference for anyone (including a future AI session) picking this project back up.
 
 ## What this is
 
@@ -82,6 +82,14 @@ The fix, `recheckAuthSession()` in `App.tsx`, checks `error` too: a session-less
 ## Edge Functions
 
 Four Edge Functions under `supabase/functions/`: `create-account` (account creation, including the Master-Admin-only ability to create Admin accounts), `validate-bet-entry`, `distribute-over-limit`, `calculate-pnl`. Most day-to-day mutations go through Postgres RPCs called directly via `supabase.rpc()` rather than Edge Functions — Edge Functions are reserved for logic that predates the RPC pattern or that benefited from being callable outside the RLS/RPC context.
+
+## Branding assets (public/brand/)
+
+The account owner supplied 4 canonical SVGs — `treasure-logo.svg` (full wordmark + gem mark, used standalone), `treasure-icon-web.svg`, `treasure-icon-ios.svg`, `treasure-icon-android.svg` (square icon-only variants, one per platform's icon conventions) — saved verbatim under `public/brand/` as the source of truth for the brand going forward. A 5th file, `treasure-logo-transparent.svg`, is a derivative created for this project only: identical to `treasure-logo.svg` but with its solid `#160F06` backdrop `<rect>` stripped out, so it composites cleanly onto `LoginScreen`'s actual page background (`C.bg = #07080D`, a different dark hue) instead of showing as a mismatched hard-edged square. If the owner ever updates the source logo, regenerate this variant by removing the same base background rect rather than hand-editing it separately.
+
+**Where each asset is used**: `LoginScreen.tsx` renders the full `treasure-logo-transparent.svg` at `w-40 h-40` (the wordmark is baked into the SVG's own `<text>`, so no separate `<h1>` sits next to it). `AdminLayout.tsx`/`UserLayout.tsx`/`PartnerLayout.tsx` sidebar/header logos use the small square `treasure-icon-web.svg` next to a plain-text "TREASURE" `<span>` — the compact header strip doesn't have room for the full serif wordmark's letter-spacing to read cleanly at that size, so icon + plain text was kept instead of swapping in the full logo asset. `index.html` links `treasure-icon-web.svg` as the browser-tab favicon (`<link rel="icon" type="image/svg+xml">`), with a PNG fallback for browsers that don't support SVG favicons.
+
+**Home-screen/app icons (PNG, not SVG)**: `public/apple-touch-icon.png` (180×180, from the ios variant), `public/icon-192.png` and `public/icon-512.png` (from the web variant), and `public/icon-maskable-512.png` (512×512 with extra safe-area padding, from the android variant) were all regenerated from the new SVGs and overwrite the old placeholder PNGs in place — same filenames, so `vite.config.ts`'s VitePWA manifest and `index.html`'s existing icon links needed no changes. iOS Safari's "Add to Home Screen" doesn't read the web manifest and requires a real raster PNG, which is why these can't just be the SVGs directly. Regeneration used a hand-written Python/pycairo script (`ImageSurface` + `Context`, reconstructing the SVG's rounded-rect clip, radial glow gradients, and gold-gradient gem-line strokes at each target pixel size) rather than a standard SVG-to-PNG tool, because the sandbox has no network access to install one (`npm install sharp`, `pip install cairosvg`, and `apt-get install librsvg2-bin` all failed — no registry access and no root) — `pycairo`/`Pillow` happened to already be present locally. Every output was visually verified (viewed as an image) before being committed.
 
 ## Conventions
 

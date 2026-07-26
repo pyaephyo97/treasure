@@ -36,15 +36,14 @@ export function LoginScreen() {
         style={{ background: C.blue }} />
 
       <div className="relative z-10 w-full max-w-md mx-auto px-4">
-        {/* Logo */}
+        {/* Logo — the gem mark + "TREASURE" wordmark are both baked into
+            this one asset (see public/brand/), so no separate <h1> text is
+            needed alongside it. The "-transparent" variant drops the
+            logo's own square backdrop fill so it blends into this screen's
+            existing dark background/glow instead of showing as a
+            mismatched hard-edged box. */}
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-            style={{ background: C.goldGrad, boxShadow: `0 0 40px ${C.goldDim}` }}>
-            <span style={{ fontSize: 28, lineHeight: 1 }}>♦</span>
-          </div>
-          <h1 style={{ color: C.gold, fontSize: 28, fontWeight: 700, letterSpacing: '0.12em', margin: 0 }}>
-            TREASURE
-          </h1>
+          <img src="/brand/treasure-logo-transparent.svg" alt="Treasure" className="w-40 h-40" style={{ marginBottom: 4 }} />
           <p style={{ color: C.textDim, fontSize: 12, marginTop: 4, letterSpacing: '0.08em' }}>
             2D LOTTERY MANAGEMENT PLATFORM
           </p>
